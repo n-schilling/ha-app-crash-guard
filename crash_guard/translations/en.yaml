@@ -1,0 +1,43 @@
+configuration:
+  drop_times:
+    name: Check times
+    description: Times (HH:MM) of the scheduled page cache check.
+  verify_on_drop:
+    name: Verify on drop
+    description: With drop_on_schedule, hash the files before and after the drop.
+  drop_on_schedule:
+    name: Drop cache on schedule
+    description: Drop the page cache at the check times. Off only checks; a scheduled drop can move a defective page to freshly started programs.
+  check_interval:
+    name: Crash check interval
+    description: Seconds between two checks for a crashed Home Assistant container.
+  max_restarts_per_hour:
+    name: Restarts per hour
+    description: Crashes handled at most per hour; beyond that the app only logs.
+  notify_service:
+    name: Notify service
+    description: Service for notifications, e.g. notify.mobile_app_phone; empty sends none.
+  bad_pages:
+    name: Defective RAM pages
+    description: Page frame numbers (e.g. 0x1cc447) of known defective RAM pages, from badpages.log. Each locks the 2 MB block around it.
+  ram_lock:
+    name: Manage RAM lock
+    description: Write the lock for bad_pages into the boot configuration and restore it after OS updates (Raspberry Pi only). Off only reports its state.
+  entity_prefix:
+    name: Entity ID prefix
+    description: Prefix of the entity IDs, e.g. crash_guard gives binary_sensor.crash_guard_memory_lock.
+  name_prefix:
+    name: Name prefix
+    description: Name of the device in Home Assistant; the entity names start with it.
+  crash_window_hours:
+    name: Crash window
+    description: Hours the "Program crashes (window)" sensor looks back.
+  publish_evidence:
+    name: Publish crash evidence
+    description: Also copy the logs of a crash (Home Assistant, kernel, coredumps) to /share/crash_guard, where other apps can read them. Off keeps them in the app's private data.
+  discovery_prefix:
+    name: MQTT discovery prefix
+    description: Prefix Home Assistant listens on for MQTT discovery.
+  log_level:
+    name: Log level
+    description: "How much the app writes to its log: info, warning or error."

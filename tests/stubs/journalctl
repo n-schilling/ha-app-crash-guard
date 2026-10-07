@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stub for journalctl: the same coredump entries for -b and --since
+cat "${CG_FIXTURES:-/tests/fixtures}/journal.json"

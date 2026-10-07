@@ -1,0 +1,43 @@
+configuration:
+  drop_times:
+    name: Prüfzeiten
+    description: Uhrzeiten (HH:MM) der geplanten Page-Cache-Prüfung.
+  verify_on_drop:
+    name: Beim Leeren prüfen
+    description: Mit drop_on_schedule die Dateien vor und nach dem Leeren hashen.
+  drop_on_schedule:
+    name: Cache planmäßig leeren
+    description: Leert den Page Cache zu den Prüfzeiten. Aus prüft nur; ein geplantes Leeren kann eine defekte Speicherseite an frisch gestartete Programme weitergeben.
+  check_interval:
+    name: Absturz-Prüfintervall
+    description: Sekunden zwischen zwei Prüfungen auf einen abgestürzten Home-Assistant-Container.
+  max_restarts_per_hour:
+    name: Neustarts pro Stunde
+    description: Höchstens so viele Abstürze pro Stunde werden behandelt; darüber protokolliert die App nur.
+  notify_service:
+    name: Benachrichtigungsdienst
+    description: Dienst für Benachrichtigungen, z. B. notify.mobile_app_handy; leer sendet keine.
+  bad_pages:
+    name: Defekte RAM-Seiten
+    description: Page Frame Numbers (z. B. 0x1cc447) bekannter defekter RAM-Seiten aus badpages.log. Jede sperrt den 2-MB-Block um sie herum.
+  ram_lock:
+    name: RAM-Sperre verwalten
+    description: Schreibt die Sperre für bad_pages in die Boot-Konfiguration und stellt sie nach OS-Updates wieder her (nur Raspberry Pi). Aus meldet nur ihren Zustand.
+  entity_prefix:
+    name: Entity-ID-Präfix
+    description: Präfix der Entity-IDs, z. B. ergibt crash_guard binary_sensor.crash_guard_memory_lock.
+  name_prefix:
+    name: Namenspräfix
+    description: Name des Geräts in Home Assistant; die Entitätsnamen beginnen damit.
+  crash_window_hours:
+    name: Absturz-Fenster
+    description: Stunden, die der Sensor „Program crashes (window)“ zurückblickt.
+  publish_evidence:
+    name: Absturz-Beweise freigeben
+    description: Kopiert auch die Logs eines Absturzes (Home Assistant, Kernel, Coredumps) nach /share/crash_guard, wo andere Apps sie lesen können. Aus behält sie in den privaten Daten der App.
+  discovery_prefix:
+    name: MQTT-Discovery-Präfix
+    description: Präfix, auf dem Home Assistant MQTT-Discovery empfängt.
+  log_level:
+    name: Log-Level
+    description: "Wie viel die App in ihr Log schreibt: info, warning oder error."
