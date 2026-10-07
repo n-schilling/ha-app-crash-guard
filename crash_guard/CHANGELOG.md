@@ -2,7 +2,13 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0] - 2026-10-07
+## [1.5.1] - 2026-10-07
+
+### Fixed
+
+- The lock tool also knows the German marker line that versions before 1.1 wrote into `config.txt`: taking the lock out removes it, and new lines go under it
+
+## 1.5.0 - 2026-10-07
 
 ### Added
 
@@ -167,4 +173,4 @@ All notable changes to this app are documented here. The format follows [Keep a 
 
 - First version in this repository
 
-[1.5.0]: https://github.com/n-schilling/ha-app-crash-guard/releases/tag/v1.5.0
+[1.5.1]: https://github.com/n-schilling/ha-app-crash-guard/releases/tag/v1.5.1

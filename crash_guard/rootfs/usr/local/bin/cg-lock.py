@@ -42,6 +42,8 @@ DT = os.environ.get("CG_DT", "/sys/firmware/devicetree/base")
 DT_RESERVED = os.path.join(DT, "reserved-memory")
 WORK = "/tmp/crash-guard"
 MARKER = "# Crash Guard: lock defective RAM areas (do not remove)"
+# The marker as versions before 1.1 wrote it
+MARKERS = {MARKER, "# Crash Guard: defekte RAM-Bereiche sperren (nicht entfernen)"}
 # Overlays and config lines this tool owns; anything else is never touched
 OWNED = re.compile(r"^badram-[0-9a-f-]+$")
 
@@ -169,7 +171,7 @@ def install(name: str, src: str, blocks: list[int]) -> dict:
         changed = True
     if not has_line(cfg, name):
         lines = cfg.splitlines(keepends=True)
-        marker = next((i for i, line in enumerate(lines) if line.rstrip("\n") == MARKER), None)
+        marker = next((i for i, line in enumerate(lines) if line.rstrip("\n") in MARKERS), None)
         if marker is not None:
             # A lock written before: the new line goes right under its marker
             lines.insert(marker + 1, f"dtoverlay={name}\n")
@@ -211,9 +213,9 @@ def remove() -> dict:
     kept: list[str] = []
     for line in lines:
         m = re.match(r"^dtoverlay=(\S+)\s*$", line)
-        if (m and OWNED.match(m.group(1))) or line.rstrip("\n") == MARKER:
+        if (m and OWNED.match(m.group(1))) or line.rstrip("\n") in MARKERS:
             # The "[all]" this tool wrote right before its marker goes too
-            if line.rstrip("\n") == MARKER and kept and kept[-1].strip() == "[all]":
+            if line.rstrip("\n") in MARKERS and kept and kept[-1].strip() == "[all]":
                 kept.pop()
             continue
         kept.append(line)

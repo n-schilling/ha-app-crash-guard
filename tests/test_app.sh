@@ -102,6 +102,13 @@ expect 'remove: config.txt as before the lock' "$(cmp -s "${CG_BOOT}/config.txt"
 expect 'remove: own overlays gone from both slots' "$(find "${CG_BOOT}" -name 'badram-1*' | wc -l | tr -d ' ')" 0
 expect 'remove: other overlays kept' "$([[ -f "${CG_BOOT}/slot-A/overlays/badram-custom.dtbo" ]] && echo kept)" kept
 expect 'remove again: nothing to do' "$(python3 /usr/local/bin/cg-lock.py remove | jq -c '[.changed, .config]')" '[false,false]'
+# A lock written by a version before 1.1, with the German marker
+printf '%s\n' '[all]' '# Crash Guard: defekte RAM-Bereiche sperren (nicht entfernen)' 'dtoverlay=badram-1cc447' >> "${CG_BOOT}/config.txt"
+st=$(lock install badram-1cc447-2000 200000 1cc400000 2000000)
+expect 'old marker: the new line goes under it' "$(tail -2 "${CG_BOOT}/config.txt" | tr '\n' '|')" \
+    '# Crash Guard: defekte RAM-Bereiche sperren (nicht entfernen)|dtoverlay=badram-1cc447-2000|'
+python3 /usr/local/bin/cg-lock.py remove > /dev/null
+expect 'old marker removed with the lock' "$(cmp -s "${CG_BOOT}/config.txt" "${WORK}/config.orig" && echo same)" same
 
 echo '# Case rotation (rotate.sh)'
 mkdir -p "${WORK}/cases"
