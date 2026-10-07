@@ -51,9 +51,11 @@ ENTITY_PREFIX=$(bashio::config 'entity_prefix')
 NAME_PREFIX=$(bashio::config 'name_prefix')
 CRASH_WINDOW_H=$(bashio::config 'crash_window_hours')
 PUBLISH_EVIDENCE=$(bashio::config 'publish_evidence')
+CASES_TO_KEEP=$(bashio::config 'cases_to_keep')
+[[ "${CASES_TO_KEEP}" =~ ^[0-9]+$ ]] || CASES_TO_KEEP=20
 mapfile -t DROP_TIMES < <(bashio::config 'drop_times')
 mapfile -t BAD_PAGES < <(bashio::config 'bad_pages' | sed '/^null$/d; /^$/d')
-readonly INTERVAL MAX_RESTARTS VERIFY DROP_ON_SCHEDULE RAM_LOCK NOTIFY ENTITY_PREFIX NAME_PREFIX CRASH_WINDOW_H PUBLISH_EVIDENCE DROP_TIMES BAD_PAGES
+readonly INTERVAL MAX_RESTARTS VERIFY DROP_ON_SCHEDULE RAM_LOCK NOTIFY ENTITY_PREFIX NAME_PREFIX CRASH_WINDOW_H PUBLISH_EVIDENCE CASES_TO_KEEP DROP_TIMES BAD_PAGES
 
 # RAM lock: a device tree overlay reserves the aligned 2 MB block around each
 # defective page; cg-lock.py builds it from bad_pages
@@ -243,10 +245,11 @@ to_share() {
 # a new folder; an existing path of that name is never used
 # Crash evidence that may hold secrets (logs of Home Assistant, the kernel
 # and coredumps); it reaches /share only with publish_evidence, else it stays
-# in the private /data, where the last CASES_KEPT cases are kept
+# in the private /data. Both there and in /share the newest cases_to_keep
+# cases are kept.
 readonly PRIVATE_EVIDENCE='container.log home-assistant.log.fault kernel.txt coredumps.txt'
 readonly CASES="${PRIV}/cases"
-readonly CASES_KEPT=20
+readonly ROTATE=/usr/local/lib/crash-guard/rotate.sh
 
 # Where the evidence of case $1 is, for messages
 evidence_at() {
@@ -266,10 +269,10 @@ publish_case() {
             [[ -f "${WORK}/${f}" ]] && mv -- "${WORK}/${f}" "${CASES}/$1/"
         done
         rmdir "${CASES}/$1" 2>/dev/null
-        # oldest first by name (the names start with the time)
-        find "${CASES}" -mindepth 1 -maxdepth 1 -type d | sort | head -n "-${CASES_KEPT}" | xargs -r rm -rf --
+        bash "${ROTATE}" "${CASES}" "${CASES_TO_KEEP}" > /dev/null
     fi
-    r=$(to_share 'mkdir -- "$1" && cp -R -- "$2"/. "$1"/ || { echo exists; exit 0; }' "$1" "${WORK}")
+    r=$(to_share 'mkdir -- "$1" && cp -R -- "$2"/. "$1"/ || { echo exists; exit 0; }
+        bash "$3" . "$4" > /dev/null' "$1" "${WORK}" "${ROTATE}" "${CASES_TO_KEEP}")
     [[ "${r}" == "done" ]] || bashio::log.error "Case $1 not published to /share: ${r}"
     rm -rf "${WORK}"
 }
@@ -522,8 +525,26 @@ share_logs() {
 
 # Hourly, and right after the start, a check or a crash: RAM lock (when bad
 # pages are configured), the guard sensors and the log copies in /share
+# ram_lock on, but no bad pages any more: take the lock this app wrote out
+# of the boot configuration again
+unlock_cycle() {
+    local st
+    st=$(helper '{Privileged:true, NetworkMode:"none", ReadonlyRootfs:true, Tmpfs:{"/tmp":""},
+                  Binds:["/mnt/boot:/mnt/boot"]}' /usr/local/bin/cg-lock.py remove)
+    if ! jq -e 'type == "object" and (has("error") | not)' > /dev/null 2>&1 <<< "${st}"; then
+        event "RAM lock: removal failed: ${st:-no answer}"
+    elif jq -e '.changed == true' > /dev/null <<< "${st}"; then
+        event 'RAM lock removed from the boot configuration (no bad_pages); it ends with the next host reboot'
+        notify 'Crash Guard: RAM lock removed' 'bad_pages is empty, so the lock of defective RAM was taken out of the boot configuration. It ends with the next host reboot.'
+    fi
+}
+
 status_cycle() {
-    (( ${#LOCK_BLOCKS[@]} > 0 )) && lock_cycle
+    if (( ${#LOCK_BLOCKS[@]} > 0 )); then
+        lock_cycle
+    elif [[ "${RAM_LOCK}" == true ]]; then
+        unlock_cycle
+    fi
     publish_guard
     flush_states
     (( MQTT )) && printf 'online' | cg_pub "${CG_AVAIL}"

@@ -49,6 +49,7 @@ start_guard() {
                 name_prefix) echo Test ;;
                 crash_window_hours) echo 24 ;;
                 publish_evidence) echo false ;;
+                cases_to_keep) echo 20 ;;
                 drop_times) echo 25:00 ;;
                 bad_pages) echo 0x1cc447 ;;
                 discovery_prefix) echo homeassistant ;;

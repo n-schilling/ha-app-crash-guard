@@ -1,5 +1,5 @@
 name: Crash Guard
-version: "1.4.0"
+version: "1.5.0"
 slug: crash_guard
 description: Catches and counts crashes - of Home Assistant and of every host program - checks the page cache for corrupted files and locks defective RAM blocks
 url: https://github.com/n-schilling/ha-app-crash-guard
@@ -33,6 +33,7 @@ options:
   name_prefix: Crash Guard
   crash_window_hours: 24
   publish_evidence: false
+  cases_to_keep: 20
   discovery_prefix: homeassistant
   log_level: info
 schema:
@@ -50,5 +51,6 @@ schema:
   name_prefix: str
   crash_window_hours: int(1,168)
   publish_evidence: bool
+  cases_to_keep: int(1,500)
   discovery_prefix: match(^[A-Za-z0-9_/-]+$)
   log_level: list(info|warning|error)

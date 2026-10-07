@@ -7,6 +7,7 @@ Runs in the privileged helper container (without the privilege Docker hides
 cg-lock.py check   <overlay-name> <block-size> <block-address>...
 cg-lock.py install <overlay-name> <block-size> <block-address>...
 cg-lock.py render  <overlay-name> <block-size> <block-address>...
+cg-lock.py remove
 
 Sizes and addresses are hexadecimal. The overlay reserves each block under
 /reserved-memory with no-map, so Linux never hands it out again. It is built
@@ -20,7 +21,11 @@ Prints exactly one JSON line:
   other_overlay the same for the other slot (None = slot missing)
   ready         config + slot_overlay: the lock takes effect on the next boot
   changed       install wrote something
-render prints the overlay's path and hash instead.
+render prints the overlay's path and hash instead. remove takes every lock
+this tool wrote out of both slots and config.txt and prints:
+  changed       something was removed
+  config        a dtoverlay line of this tool is still in config.txt
+  active        a locked block is still in effect (until the next boot)
 """
 import hashlib
 import json
@@ -157,28 +162,80 @@ def install(name: str, src: str, blocks: list[int]) -> dict:
         if not (m := re.match(r"^dtoverlay=(\S+)\s*$", line)) or not OWNED.match(m.group(1)) or m.group(1) == name
     ]
     if len(kept) != len(lines):
-        # Lines of an earlier set of blocks: rewrite through a temporary file
-        # and an atomic rename, so a crash never leaves a half-written config
+        # Lines of an earlier set of blocks: rewritten atomically, so a crash
+        # never leaves a half-written config
         cfg = "".join(kept)
-        tmp = f"{CONFIG}.crash-guard"
-        with open(tmp, "w", encoding="ascii") as f:
-            f.write(cfg)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, CONFIG)
+        write_config(cfg)
         changed = True
     if not has_line(cfg, name):
-        # HAOS ends config.txt with "[all]"; there the line applies to every board
-        tail = "" if cfg.endswith("\n") else "\n"
-        with open(CONFIG, "a", encoding="ascii") as f:
-            f.write(f"{tail}[all]\n{MARKER}\ndtoverlay={name}\n")
+        lines = cfg.splitlines(keepends=True)
+        marker = next((i for i, line in enumerate(lines) if line.rstrip("\n") == MARKER), None)
+        if marker is not None:
+            # A lock written before: the new line goes right under its marker
+            lines.insert(marker + 1, f"dtoverlay={name}\n")
+            cfg = "".join(lines)
+            write_config(cfg)
+        else:
+            # HAOS ends config.txt with "[all]"; there the line applies to every board
+            tail = "" if cfg.endswith("\n") else "\n"
+            with open(CONFIG, "a", encoding="ascii") as f:
+                f.write(f"{tail}[all]\n{MARKER}\ndtoverlay={name}\n")
         changed = True
     if changed:
         os.sync()
     return status(name, want, blocks, changed)
 
 
+def write_config(cfg: str) -> None:
+    """Rewrites config.txt through a temporary file and an atomic rename."""
+    tmp = f"{CONFIG}.crash-guard"
+    with open(tmp, "w", encoding="ascii") as f:
+        f.write(cfg)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, CONFIG)
+
+
+def remove() -> dict:
+    """Takes out every overlay and config line this tool wrote, nothing else."""
+    changed = False
+    for slot in ("slot-A", "slot-B"):
+        odir = os.path.join(BOOT, slot, "overlays")
+        if not os.path.isdir(odir):
+            continue
+        for old in os.listdir(odir):
+            if old.endswith(".dtbo") and OWNED.match(old.removesuffix(".dtbo")):
+                os.remove(os.path.join(odir, old))
+                changed = True
+    lines = read_config().splitlines(keepends=True)
+    kept: list[str] = []
+    for line in lines:
+        m = re.match(r"^dtoverlay=(\S+)\s*$", line)
+        if (m and OWNED.match(m.group(1))) or line.rstrip("\n") == MARKER:
+            # The "[all]" this tool wrote right before its marker goes too
+            if line.rstrip("\n") == MARKER and kept and kept[-1].strip() == "[all]":
+                kept.pop()
+            continue
+        kept.append(line)
+    if len(kept) != len(lines):
+        write_config("".join(kept))
+        changed = True
+    if changed:
+        os.sync()
+    cfg = read_config()
+    active = os.path.isdir(DT_RESERVED) and any(n.startswith("badram@") for n in os.listdir(DT_RESERVED))
+    return {"changed": changed, "active": active,
+            "config": any(OWNED.match(m) for m in re.findall(r"^dtoverlay=(\S+)\s*$", cfg, re.M))}
+
+
 def main() -> None:
+    if sys.argv[1:] == ["remove"]:
+        try:
+            st = remove()
+        except OSError as e:
+            st = {"error": str(e)}
+        print(json.dumps(st))
+        return
     mode, name, size_hex, *addresses = sys.argv[1:]
     size = int(size_hex, 16)
     blocks = sorted(int(a, 16) for a in addresses)

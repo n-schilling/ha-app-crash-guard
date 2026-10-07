@@ -59,10 +59,11 @@ and shows the same message as a notification in Home Assistant. The notification
 | `max_restarts_per_hour` | `3` | Crashes handled per hour at most |
 | `notify_service` | | Notification service such as `notify.mobile_app_phone`; empty sends none |
 | `bad_pages` | | Page frame numbers of defective pages, e.g. `0x1cc447`, taken from `badpages.log` |
-| `ram_lock` | `false` | Write the lock into the boot configuration and restore it; off only reports its state |
+| `ram_lock` | `false` | Write the lock into the boot configuration and restore it; with `bad_pages` empty, take it out again. Off only reports its state and never touches the boot configuration |
 | `entity_prefix` | `crash_guard` | Prefix of the entity IDs |
 | `name_prefix` | `Crash Guard` | Name of the device; the entity names start with it |
 | `crash_window_hours` | `24` | Hours the program crash window looks back |
+| `cases_to_keep` | `20` | Case folders (checks, crashes) kept in `/share/crash_guard` and in the app's private data; older ones are removed |
 | `publish_evidence` | `false` | Also copy the logs of a crash (Home Assistant container log, `home-assistant.log.fault`, kernel and coredump messages) to `/share/crash_guard`. Other apps, e.g. Samba, can read `/share`, and logs may hold secrets; off keeps them in the app's private data |
 | `discovery_prefix` | `homeassistant` | MQTT discovery prefix |
 | `log_level` | `info` | How much the app writes to its log: `info`, `warning` or `error` |
@@ -112,7 +113,7 @@ actions:
 3. The app writes a device tree overlay (`badram-<pages>.dtbo`) to both boot slots and a `dtoverlay=` line to `config.txt`. The lock takes effect with the next host reboot; the memory lock entity then turns on.
 4. Home Assistant OS updates replace the boot slot; the app restores the overlay within an hour, and the next reboot activates it again.
 
-To remove the lock, turn off `ram_lock`, delete the `dtoverlay=badram-…` line from `config.txt` and reboot.
+To remove the lock, empty `bad_pages` and leave `ram_lock` on: within an hour the app takes its overlays out of both boot slots and its lines out of `config.txt`, and notifies you; the lock ends with the next host reboot. It removes only what it wrote itself (`badram-…` overlays, its marker and `dtoverlay` lines). With `ram_lock` off the app never writes the boot configuration; then delete the `dtoverlay=badram-…` line yourself.
 
 ## Known limitations
 
@@ -122,7 +123,7 @@ To remove the lock, turn off `ram_lock`, delete the `dtoverlay=badram-…` line 
 
 ## Removing the app
 
-With MQTT, the entities stay in Home Assistant after the app is removed. Delete the device under **Settings → Devices & services → MQTT**. A RAM lock stays in `config.txt`; remove it as described above.
+With MQTT, the entities stay in Home Assistant after the app is removed. Delete the device under **Settings → Devices & services → MQTT**. A RAM lock stays in `config.txt`; take it out as described above before you remove the app.
 
 ## Files
 
@@ -131,7 +132,7 @@ The app keeps its logs, state and reference hashes in its private data folder. `
 - `events.log`, `drops.log`, `badpages.log`: copies of the logs, refreshed hourly and after every check or crash
 - one folder per case (`<time>-check`, `<time>-crash`, …) with the hash lists, the differing files and the hashes that differed
 
-The logs of a crash (container log, `home-assistant.log.fault`, kernel and coredump messages) go into the case folder only with `publish_evidence`. Without it they stay in the app's private data under `crash_guard/cases/<case>`, the last 20 cases; you can read them through a backup of the app, or turn on `publish_evidence` while you need them.
+The logs of a crash (container log, `home-assistant.log.fault`, kernel and coredump messages) go into the case folder only with `publish_evidence`. Without it they stay in the app's private data under `crash_guard/cases/<case>`, the last `cases_to_keep` cases; you can read them through a backup of the app, or turn on `publish_evidence` while you need them.
 
 `/share` is writable by other apps, so the app never acts on anything it finds there: the copies are written by a helper container that can write nowhere but `/share`.
 

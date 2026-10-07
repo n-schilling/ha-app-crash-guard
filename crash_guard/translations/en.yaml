@@ -22,7 +22,7 @@ configuration:
     description: Page frame numbers (e.g. 0x1cc447) of known defective RAM pages, from badpages.log. Each locks the 2 MB block around it.
   ram_lock:
     name: Manage RAM lock
-    description: Write the lock for bad_pages into the boot configuration and restore it after OS updates (Raspberry Pi only). Off only reports its state.
+    description: Write the lock for bad_pages into the boot configuration and restore it after OS updates (Raspberry Pi only); with bad_pages empty, take it out again. Off only reports its state.
   entity_prefix:
     name: Entity ID prefix
     description: Prefix of the entity IDs, e.g. crash_guard gives binary_sensor.crash_guard_memory_lock.
@@ -35,6 +35,9 @@ configuration:
   publish_evidence:
     name: Publish crash evidence
     description: Also copy the logs of a crash (Home Assistant, kernel, coredumps) to /share/crash_guard, where other apps can read them. Off keeps them in the app's private data.
+  cases_to_keep:
+    name: Cases to keep
+    description: How many case folders (checks, crashes) are kept, in /share/crash_guard and in the app's private data; older ones are removed.
   discovery_prefix:
     name: MQTT discovery prefix
     description: Prefix Home Assistant listens on for MQTT discovery.

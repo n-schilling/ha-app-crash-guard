@@ -87,12 +87,36 @@ expect 'active once the kernel has the node' "$(field active "$(lock check badra
 st=$(lock install badram-1cc447-2000 200000 1cc400000 2000000)
 expect 'new pages: overlay replaced' "$(ls "${CG_BOOT}/slot-A/overlays" | tr '\n' ' ')" 'badram-1cc447-2000.dtbo badram-custom.dtbo '
 expect 'new pages: old line gone, new line there' "$(grep '^dtoverlay=badram' "${CG_BOOT}/config.txt")" 'dtoverlay=badram-1cc447-2000'
+expect 'new pages: one marker, the line right under it' "$(tail -3 "${CG_BOOT}/config.txt" | tr '\n' '|')" \
+    '[all]|# Crash Guard: lock defective RAM areas (do not remove)|dtoverlay=badram-1cc447-2000|'
 expect 'new pages: other lines untouched' "$(grep -v badram "${CG_BOOT}/config.txt" | grep -vF '# Crash Guard' | grep -v '^\[all\]$' | tr '\n' '|')" \
     'disable_splash=1|os_prefix=slot-A/|dtoverlay=vc4-kms-v3d|'
 expect 'new pages: no temporary file left' "$(find "${CG_BOOT}" -maxdepth 1 -name '*crash-guard*' | wc -l)" 0
 expect 'new pages: not active before a reboot' "$(jq -c '[.active, .ready]' <<< "${st}")" '[false,true]'
 expect 'other overlays are never touched' "$([[ -f "${CG_BOOT}/slot-A/overlays/badram-custom.dtbo" ]] && echo kept)" kept
 expect 'a name it does not own is refused' "$(lock install vc4-kms-v3d 200000 1cc400000 | jq -r '.error | startswith("invalid lock")')" true
+
+st=$(python3 /usr/local/bin/cg-lock.py remove)
+expect 'remove: something removed, still active until the reboot' "$(jq -c '[.changed, .config, .active]' <<< "${st}")" '[true,false,true]'
+expect 'remove: config.txt as before the lock' "$(cmp -s "${CG_BOOT}/config.txt" "${WORK}/config.orig" && echo same)" same
+expect 'remove: own overlays gone from both slots' "$(find "${CG_BOOT}" -name 'badram-1*' | wc -l | tr -d ' ')" 0
+expect 'remove: other overlays kept' "$([[ -f "${CG_BOOT}/slot-A/overlays/badram-custom.dtbo" ]] && echo kept)" kept
+expect 'remove again: nothing to do' "$(python3 /usr/local/bin/cg-lock.py remove | jq -c '[.changed, .config]')" '[false,false]'
+
+echo '# Case rotation (rotate.sh)'
+mkdir -p "${WORK}/cases"
+for c in 20261001-040000-check 20261002-040000-check 20261003-120000-crash 20261004-040000-check; do
+    mkdir "${WORK}/cases/${c}"
+done
+mkdir "${WORK}/cases/keep-me" "${WORK}/outside"
+touch "${WORK}/outside/precious"
+ln -s "${WORK}/outside" "${WORK}/cases/20260101-000000-link"
+expect 'reports what it removed' "$(bash /usr/local/lib/crash-guard/rotate.sh "${WORK}/cases" 2)" 'removed 2'
+expect 'keeps the newest cases and anything else' "$(ls "${WORK}/cases" | tr '\n' ' ')" \
+    '20260101-000000-link 20261003-120000-crash 20261004-040000-check keep-me '
+expect 'never follows a symlink' "$([[ -f "${WORK}/outside/precious" ]] && echo kept)" kept
+expect 'nothing to do below the limit' "$(bash /usr/local/lib/crash-guard/rotate.sh "${WORK}/cases" 5)" ''
+expect 'refuses a bad number' "$(bash /usr/local/lib/crash-guard/rotate.sh "${WORK}/cases" x 2>&1; echo "rc=$?")" $'invalid number: x\nrc=1'
 
 echo '# Hash helper (cg-hash.sh)'
 L=/mnt/data/docker/overlay2

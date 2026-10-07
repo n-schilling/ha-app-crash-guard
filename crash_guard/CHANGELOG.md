@@ -2,7 +2,22 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0] - 2026-10-07
+## [1.5.0] - 2026-10-07
+
+### Added
+
+- The RAM lock is taken out again when `bad_pages` is emptied with `ram_lock` on: the app's own overlays leave both boot slots and its lines leave `config.txt`, atomically; a notification says so. With `ram_lock` off the boot configuration is never touched
+- Option `cases_to_keep` (20): case folders kept in `/share/crash_guard` and in the private data
+
+### Changed
+
+- Before, case folders in `/share/crash_guard` were never removed
+
+### Fixed
+
+- When the bad pages change, the new `dtoverlay` line goes under the existing marker in `config.txt` instead of a second `[all]` block with a second marker
+
+## 1.4.0 - 2026-10-07
 
 ### Added
 
@@ -152,4 +167,4 @@ All notable changes to this app are documented here. The format follows [Keep a 
 
 - First version in this repository
 
-[1.4.0]: https://github.com/n-schilling/ha-app-crash-guard/releases/tag/v1.4.0
+[1.5.0]: https://github.com/n-schilling/ha-app-crash-guard/releases/tag/v1.5.0

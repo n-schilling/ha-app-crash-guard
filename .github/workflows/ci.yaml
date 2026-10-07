@@ -30,6 +30,7 @@ jobs:
           crash_guard/rootfs/usr/local/bin/cg-hash.sh
           crash_guard/rootfs/usr/local/lib/crash-guard/lock.sh
           crash_guard/rootfs/usr/local/lib/crash-guard/entities.sh
+          crash_guard/rootfs/usr/local/lib/crash-guard/rotate.sh
           crash_guard/rootfs/usr/local/lib/mqtt-device.sh
           tests/test_broker.sh tests/test_guard.sh tests/stubs/*
           tests/test_app.sh
