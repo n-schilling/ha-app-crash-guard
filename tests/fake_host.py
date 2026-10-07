@@ -118,8 +118,9 @@ class Docker(Handler):
             HELPERS[helper_id] = body
             cmd = body.get("Cmd") or []
             # publish_case: keep what would reach /share, for the test to look at
-            if any("mkdir --" in part for part in cmd) and len(cmd) >= 2 and os.path.isdir(cmd[-1]):
-                shutil.copytree(cmd[-1], DIR / "published" / cmd[-2], symlinks=True)
+            # (Cmd: -c <script> to_share <case name> <case folder> ...)
+            if any("mkdir --" in part for part in cmd) and len(cmd) >= 5 and os.path.isdir(cmd[4]):
+                shutil.copytree(cmd[4], DIR / "published" / cmd[3], symlinks=True)
             return self.reply(201, {"Id": helper_id})
         parts = path.strip("/").split("/")
         if len(parts) >= 2 and parts[0] == "containers" and parts[1] in HELPERS:
