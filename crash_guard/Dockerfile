@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-debian:trixie
+ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
 # hadolint ignore=DL3006
 FROM ${BUILD_FROM}
 

@@ -60,9 +60,8 @@ jobs:
           ARCH: ${{ matrix.arch }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          base=$(yq -r ".build_from.${ARCH}" crash_guard/build.yaml)
           version=$(yq -r '.version' crash_guard/config.yaml)
-          docker buildx build --platform "${PLATFORM}" --build-arg "BUILD_FROM=${base}" \
+          docker buildx build --platform "${PLATFORM}" \
             --build-arg "BUILD_VERSION=${version}" --load -t crash-guard:test crash_guard
       - name: Test
         env:
@@ -89,9 +88,8 @@ jobs:
           persist-credentials: false
       - name: Build
         run: |
-          base=$(yq -r '.build_from.amd64' crash_guard/build.yaml)
           version=$(yq -r '.version' crash_guard/config.yaml)
-          docker build --build-arg "BUILD_FROM=${base}" --build-arg "BUILD_VERSION=${version}" \
+          docker build --build-arg "BUILD_VERSION=${version}" \
             -t crash-guard:test crash_guard
       - name: Start the broker
         run: |
