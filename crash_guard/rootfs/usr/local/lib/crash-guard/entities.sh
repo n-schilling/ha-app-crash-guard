@@ -70,6 +70,7 @@ cg_drop_state() {
 # first message the broker does not take, with the reason in PUB_ERROR
 # instead of on stderr.
 PUB_ERROR=''
+# shellcheck disable=SC2034  # PUB_ERROR is read by the guard service
 cg_publish() {
     local suffix=$1 payload=$2
     PUB_ERROR=$(jq -j '.state | if . == "unknown" or . == null then "None" else tostring end' <<< "${payload}" \
