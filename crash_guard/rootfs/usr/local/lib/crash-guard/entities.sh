@@ -66,13 +66,16 @@ cg_drop_state() {
 
 # Publishes a state in the API format {state, attributes}: the state and the
 # attributes without what discovery already sets (name, icon). An unknown
-# state is sent as None, which Home Assistant shows as unknown.
+# state is sent as None, which Home Assistant shows as unknown. Fails at the
+# first message the broker does not take, with the reason in PUB_ERROR
+# instead of on stderr.
+PUB_ERROR=''
 cg_publish() {
     local suffix=$1 payload=$2
-    jq -j '.state | if . == "unknown" or . == null then "None" else tostring end' <<< "${payload}" \
-        | cg_pub "${CG_TOPIC}/${suffix}"
-    jq -c '.attributes | del(.friendly_name, .icon)' <<< "${payload}" \
-        | cg_pub "${CG_TOPIC}/${suffix}/attributes"
+    PUB_ERROR=$(jq -j '.state | if . == "unknown" or . == null then "None" else tostring end' <<< "${payload}" \
+        | cg_pub "${CG_TOPIC}/${suffix}" 2>&1) || return 1
+    PUB_ERROR=$(jq -c '.attributes | del(.friendly_name, .icon)' <<< "${payload}" \
+        | cg_pub "${CG_TOPIC}/${suffix}/attributes" 2>&1) || return 1
 }
 
 # --- Program crashes on the host -------------------------------------------------

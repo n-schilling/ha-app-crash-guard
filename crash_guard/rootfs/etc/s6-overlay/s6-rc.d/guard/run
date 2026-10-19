@@ -386,11 +386,16 @@ send_state() {
         "http://supervisor/core/api/states/$1"
 }
 
-# Sends all held states; warns only once per outage
+# Sends all held states; warns only once per outage. Over MQTT the first
+# state the broker does not take ends the round: the rest would fail the
+# same way.
 flush_states() {
     local e failed=0
     for e in "${!PAYLOAD[@]}"; do
-        send_state "${e}" || failed=1
+        if ! send_state "${e}"; then
+            failed=1
+            (( MQTT )) && break
+        fi
     done
     if (( ! failed )); then
         (( STATE_WARNED )) && bashio::log.info 'States reported to Home Assistant again'
@@ -398,7 +403,11 @@ flush_states() {
     else
         STATE_PENDING=1
         if (( ! STATE_WARNED )); then
-            bashio::log.warning 'States could not be reported - retrying every check interval'
+            if (( MQTT )); then
+                bashio::log.warning "States could not be reported, MQTT broker not reachable (${PUB_ERROR:-no answer}) - retrying every check interval"
+            else
+                bashio::log.warning 'States could not be reported - retrying every check interval'
+            fi
             STATE_WARNED=1
         fi
     fi
@@ -454,7 +463,8 @@ publish_crashes() {
             window) PAYLOAD[${WINDOW_ENTITY}]=${json} ;;
         esac
     done < <(crash_payloads "${CRASH_WINDOW_H}")
-    send_state "${BOOT_ENTITY}" && send_state "${WINDOW_ENTITY}"
+    # Not sent: flush_states takes it on with the next check
+    send_state "${BOOT_ENTITY}" && send_state "${WINDOW_ENTITY}" || STATE_PENDING=1
 }
 
 publish_lock() {
@@ -547,7 +557,8 @@ status_cycle() {
     fi
     publish_guard
     flush_states
-    (( MQTT )) && printf 'online' | cg_pub "${CG_AVAIL}"
+    # Without a broker flush_states has warned already, or nothing was due
+    (( MQTT )) && printf 'online' | cg_pub "${CG_AVAIL}" 2> /dev/null
     share_logs
 }
 
@@ -627,7 +638,8 @@ hold_availability() {
 }
 stop() {
     trap - EXIT TERM INT
-    printf 'offline' | cg_pub "${CG_AVAIL}"
+    # Without a broker the last will of the held connection says offline
+    printf 'offline' | cg_pub "${CG_AVAIL}" 2> /dev/null
     [[ -n "${HOLDER}" ]] && kill "${HOLDER}" 2>/dev/null
     exit 0
 }

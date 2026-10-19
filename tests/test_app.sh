@@ -251,6 +251,21 @@ expect 'program crashes in the window, newest first' \
     '["2",24,["curl/7/BUS","python3/11/SEGV"]]'
 expect 'no errors' "$(cat "${WORK}/entities.log")" ''
 
+echo '# Entities while the MQTT broker is away'
+: > "${PUBLISHED}"; rm -f "${PUBLISHED}.calls"
+ENTITY_PREFIX=host NAME_PREFIX='Home Assistant Host' SLUG=c3edd230_crash_guard \
+DISCOVERY_PREFIX=homeassistant PATH="/tests/stubs:${PATH}" PUB_FAIL=1 bash -c '
+    declare -a MQ=(-h broker)
+    source /usr/local/lib/crash-guard/entities.sh
+    cg_publish crashes_handled "{\"state\":\"2\",\"attributes\":{\"window\":\"24 h\"}}" && echo sent || echo "failed: ${PUB_ERROR}"
+    cg_publish crashes_handled "{\"state\":\"3\",\"attributes\":{\"window\":\"24 h\"}}" && echo sent || echo "failed: ${PUB_ERROR}"
+' > "${WORK}/away.out" 2> "${WORK}/away.log"
+expect 'a state the broker does not take fails, with the reason' "$(sed -n 1p "${WORK}/away.out")" 'failed: Error: Connection refused'
+expect 'and stops before its attributes' "$(cat "${PUBLISHED}.calls")|$(grep -c '' "${PUBLISHED}")" '3|2'
+expect 'sent once the broker is back' "$(sed -n 2p "${WORK}/away.out")|$(last crash_guard/crashes_handled)" 'sent|3'
+expect 'no raw errors' "$(cat "${WORK}/away.log")" ''
+rm -f "${PUBLISHED}.calls"
+
 rm -rf "${L}"
 if (( FAILED )); then
     exit 1

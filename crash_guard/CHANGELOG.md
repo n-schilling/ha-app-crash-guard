@@ -2,6 +2,14 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-10-19
+
+### Fixed
+
+- While the MQTT broker is away, for example during its restart, the app logs one warning with the reason and one line once the states reach Home Assistant again, instead of an `Error: …` line for every message; a round stops at its first state the broker does not take
+- A state whose message the broker did not take counted as sent when its attributes went through, so it was not sent again
+- Program crash states the broker did not take were only sent again with the next journal check; they are now sent again with the next check
+
 ## [1.5.4] - 2026-10-11
 
 ### Changed
