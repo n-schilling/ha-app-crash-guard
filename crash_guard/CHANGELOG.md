@@ -2,6 +2,12 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-10-27
+
+### Changed
+
+- Rebuilt on the current `home-assistant/base-debian:trixie` (2026.10.3): the Debian system packages and the packages the app installs are upgraded to their latest security updates; s6-overlay and bashio are unchanged
+
 ## [1.5.5] - 2026-10-19
 
 ### Fixed
