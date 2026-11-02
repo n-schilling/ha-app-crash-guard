@@ -49,7 +49,7 @@ def direct_read(path: str, size: int) -> bytes:
 
 
 def bitflips(a: bytes, b: bytes) -> int:
-    return sum(bin(x ^ y).count("1") for x, y in zip(a, b))
+    return sum(bin(x ^ y).count("1") for x, y in zip(a, b, strict=False))
 
 
 def main() -> None:

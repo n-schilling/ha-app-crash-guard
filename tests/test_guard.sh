@@ -1,8 +1,8 @@
 #!/bin/bash
 # Tests the guard service itself against a fake host (tests/fake_host.py):
 # the start, the protection mode check, the status entities, a crash of Home
-# Assistant with evidence, cache drop, restart and notification, the restart
-# limit and an intended stop. Run inside the built image, as root:
+# Assistant with evidence kept as a case, cache drop, restart and
+# notification, the restart limit and an intended stop. Run inside the built image, as root:
 #   docker run --rm --add-host supervisor:127.0.0.1 -v "$PWD/tests:/tests:ro" \
 #     --entrypoint bash <image> /tests/test_guard.sh
 # journalctl is a stub; there is no MQTT broker, so the entities are states
@@ -48,7 +48,6 @@ start_guard() {
                 entity_prefix) echo test ;;
                 name_prefix) echo Test ;;
                 crash_window_hours) echo 24 ;;
-                publish_evidence) echo false ;;
                 cases_to_keep) echo 20 ;;
                 drop_times) echo 25:00 ;;
                 bad_pages) echo 0x1cc447 ;;
@@ -90,16 +89,21 @@ expect 'helpers run the image of the app itself' \
     sha256:feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface
 expect 'cache dropped by a privileged helper without network' \
     "$(requests "${drop}" | head -1 | jq -c '.body.HostConfig | [.Privileged, .NetworkMode, .ReadonlyRootfs]')" '[true,"none",true]'
-wait_for '[[ $(count ".path == \"/core/api/states/sensor.test_crashes_window\"") -gt 0 &&
-           $(count ".path == \"/core/api/states/sensor.test_crashes_handled\"") -gt 0 &&
-           $(count ".path == \"/core/api/states/sensor.test_cache_corrupted\"") -gt 0 &&
-           $(count ".path == \"/core/api/states/binary_sensor.test_memory_lock\"") -gt 0 ]]' 30
+wait_for '[[ $(count ".path == \"/core/api/states/binary_sensor.test_crashes\"") -gt 0 &&
+           $(count ".path == \"/core/api/states/binary_sensor.test_corrupted_cache\"") -gt 0 &&
+           $(count ".path == \"/core/api/states/binary_sensor.test_memory_lock_problem\"") -gt 0 ]]' 30
 state() { requests ".path == \"/core/api/states/$1\"" | tail -1 | jq -r "$2"; }
-expect 'memory lock state' "$(state binary_sensor.test_memory_lock .body.state)" on
-expect 'cache check state' "$(state sensor.test_cache_corrupted .body.state)" unknown
-expect 'no crash handled yet' "$(state sensor.test_crashes_handled .body.state)" 0
-expect 'program crashes from the journal' "$(state sensor.test_crashes_boot .body.state)" 2
-expect 'program crashes in the window' "$(state sensor.test_crashes_window '.body.attributes.last | length')" 2
+status() { jq -r "$1" /data/crash_guard/status.json 2>/dev/null; }
+expect 'only the three problem sensors' \
+    "$(requests '.path | startswith("/core/api/states/")' | jq -r .path | sort -u | tr '\n' ' ')" \
+    '/core/api/states/binary_sensor.test_corrupted_cache /core/api/states/binary_sensor.test_crashes /core/api/states/binary_sensor.test_memory_lock_problem '
+expect 'problem sensors' "$(state binary_sensor.test_crashes .body.attributes.device_class)" problem
+expect 'memory lock in effect: no problem' "$(state binary_sensor.test_memory_lock_problem .body.state)" off
+expect 'no cache check yet' "$(state binary_sensor.test_corrupted_cache .body.state)" unknown
+expect 'program crashes in the window are a problem' "$(state binary_sensor.test_crashes .body.state)" on
+expect 'status for the web page: lock' "$(status '.lock.active, .lock.range')" "$(printf 'true\n0x1cc400000-0x1cc5fffff (2 MB)')"
+expect 'status for the web page: crashes' "$(status '[.crashes.boot, (.crashes.programs | length), (.crashes.home_assistant | length)] | join(" ")')" '2 2 0'
+expect 'status for the web page: settings' "$(status '[.cases_to_keep, .bad_pages[0]] | join(" ")')" '20 0x1cc447'
 
 echo '# Crash of Home Assistant'
 mkdir -p /homeassistant
@@ -111,16 +115,17 @@ wait_for 'events_log | grep -q "Crash handled"' 30
 expect 'crash handled' "$(events_log | grep -c 'Crash handled: exit 139')" 1
 expect 'Home Assistant started again' "$(count '.path == "/core/start" and .method == "POST"')" 1
 expect 'cache dropped again' "$(requests "${drop}" | wc -l | tr -d ' ')" 2
-expect 'evidence published through the share helper' \
-    "$(count '.path == "/containers/create" and ((.body.HostConfig.Binds // []) | index("/mnt/data/supervisor/share:/share")) and (.body.Cmd | join(" ") | test("mkdir --"))')" 1
-expect 'evidence of the crash published' "$(find "${FAKE}/published" -mindepth 1 -maxdepth 1 -name '*-crash' | wc -l | tr -d ' ')" 1
-expect 'without the logs (publish_evidence off)' "$(find "${FAKE}/published" -name container.log | wc -l | tr -d ' ')" 0
-expect 'the logs stay in the private data' "$(find /data/crash_guard/cases -name container.log | wc -l | tr -d ' ')" 1
-expect 'a symlinked fault log is not copied' "$(grep -rl hunter2 "${FAKE}/published" 2>/dev/null | wc -l | tr -d ' ')" 0
+expect 'case kept in the private data' "$(find /data/crash_guard/cases -mindepth 1 -maxdepth 1 -name '*-crash' | wc -l | tr -d ' ')" 1
+expect 'with the logs' "$(find /data/crash_guard/cases -name container.log | wc -l | tr -d ' ')" 1
+expect 'without the full hash lists' "$(find /data/crash_guard/cases -name '*.sha' | wc -l | tr -d ' ')" 0
+expect 'a symlinked fault log is not copied' "$(grep -rl hunter2 /data/crash_guard/cases 2>/dev/null | wc -l | tr -d ' ')" 0
+expect 'nothing reaches /share' "$(requests '.path == "/containers/create"' | jq -r '.body.HostConfig.Binds // [] | .[]' | grep -c share)" 0
 expect 'notification sent' "$(requests '.path == "/core/api/services/notify/test"' | jq -r '.body.message' | grep -c 'crashed at')" 1
-expect 'it says where the logs are' "$(requests '.path == "/core/api/services/notify/test"' | jq -r '.body.message' | grep -c 'private data')" 1
-wait_for '[[ "$(state sensor.test_crashes_handled .body.state)" == 1 ]]' 15
-expect 'crashes handled state' "$(state sensor.test_crashes_handled .body.state)" 1
+expect 'it names the case on the page' "$(requests '.path == "/core/api/services/notify/test"' | jq -r '.body.message' | grep -c 'on the Crash Guard page')" 1
+wait_for '[[ "$(status ".crashes.home_assistant | length")" == 1 ]]' 15
+expect 'the crash is on the web page' "$(status '.crashes.home_assistant[0].message')" \
+    "$(events_log | grep 'Crash handled' | cut -d' ' -f2-)"
+expect 'crashes state' "$(state binary_sensor.test_crashes .body.state)" on
 
 echo '# Restart limit'
 event die 139

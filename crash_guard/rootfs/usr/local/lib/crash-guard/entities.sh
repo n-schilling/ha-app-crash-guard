@@ -11,15 +11,15 @@ readonly CG_AVAIL="${CG_TOPIC}/availability"
 readonly CG_SUPPORT_URL='https://github.com/n-schilling/ha-app-crash-guard'
 
 # The entities: entity ID suffix -> "component|name|unique ID|extra discovery JSON"
-# The crash counters keep the unique IDs they had in the NVMe & Crash Monitor
-# app, so Home Assistant gives them back their entity IDs and settings.
+# Problem sensors only; the figures behind them are on the app's web page
 declare -A CG_ENTITIES=(
-    [memory_lock]='binary_sensor|Memory lock|crash_guard_memory_lock|{"icon":"mdi:memory"}'
-    [cache_corrupted]='sensor|Cache corrupted|crash_guard_cache_corrupted|{"icon":"mdi:file-alert-outline","state_class":"measurement"}'
-    [crashes_handled]='sensor|Crashes handled|crash_guard_crashes_handled|{"icon":"mdi:shield-alert-outline","state_class":"measurement"}'
-    [crashes_boot]='sensor|Program crashes since boot|ha_host_crashes_boot|{"icon":"mdi:bug-outline","state_class":"measurement"}'
-    [crashes_window]='sensor|Program crashes (window)|ha_host_crashes_window|{"icon":"mdi:bug","state_class":"measurement"}'
+    [memory_lock_problem]='binary_sensor|Memory lock problem|crash_guard_memory_lock_problem|{"device_class":"problem"}'
+    [corrupted_cache]='binary_sensor|Corrupted cache|crash_guard_corrupted_cache|{"device_class":"problem"}'
+    [crashes]='binary_sensor|Crashes|crash_guard_crashes|{"device_class":"problem"}'
 )
+# State topics of the entities before 2.0.0, cleared at every start
+# shellcheck disable=SC2034  # read by the guard service
+readonly CG_OLD_STATES='memory_lock cache_corrupted crashes_handled crashes_boot crashes_window'
 
 cg_pub()   { mosquitto_pub "${MQ[@]}" -r -q 1 -t "$1" -s; }
 cg_clear() { mosquitto_pub "${MQ[@]}" -r -q 1 -t "$1" -n; }
@@ -33,9 +33,8 @@ cg_component() {
     IFS='|' read -r component name uid extra <<< "${CG_ENTITIES[$1]}"
     jq -nc --arg name "${name}" --arg uid "${uid}" --arg p "${component}" \
         --arg eid "${component}.${ENTITY_PREFIX}_$1" \
-        --arg stt "${CG_TOPIC}/$1" --arg att "${CG_TOPIC}/$1/attributes" --argjson extra "${extra}" '
-        {platform:$p, name:$name, unique_id:$uid, default_entity_id:$eid,
-         state_topic:$stt, json_attributes_topic:$att}
+        --arg stt "${CG_TOPIC}/$1" --argjson extra "${extra}" '
+        {platform:$p, name:$name, unique_id:$uid, default_entity_id:$eid, state_topic:$stt}
         + (if $p == "binary_sensor" then {payload_on:"on", payload_off:"off"} else {} end)
         + $extra'
 }
@@ -58,25 +57,23 @@ cg_announce() {
         "${DISCOVERY_PREFIX}/+/${CG_TOPIC}/+/config"
 }
 
-# Removes the retained state of an entity that is no longer announced
+# Removes the retained state of an entity that is no longer announced, with
+# the attributes topic versions before 2.0.0 had
 cg_drop_state() {
     cg_clear "${CG_TOPIC}/$1"
     cg_clear "${CG_TOPIC}/$1/attributes"
 }
 
-# Publishes a state in the API format {state, attributes}: the state and the
-# attributes without what discovery already sets (name, icon). An unknown
-# state is sent as None, which Home Assistant shows as unknown. Fails at the
-# first message the broker does not take, with the reason in PUB_ERROR
-# instead of on stderr.
+# Publishes the state of an API format payload {state, attributes}; an
+# unknown state is sent as None, which Home Assistant shows as unknown. Fails
+# when the broker does not take it, with the reason in PUB_ERROR instead of
+# on stderr.
 PUB_ERROR=''
 # shellcheck disable=SC2034  # PUB_ERROR is read by the guard service
 cg_publish() {
     local suffix=$1 payload=$2
     PUB_ERROR=$(jq -j '.state | if . == "unknown" or . == null then "None" else tostring end' <<< "${payload}" \
-        | cg_pub "${CG_TOPIC}/${suffix}" 2>&1) || return 1
-    PUB_ERROR=$(jq -c '.attributes | del(.friendly_name, .icon)' <<< "${payload}" \
-        | cg_pub "${CG_TOPIC}/${suffix}/attributes" 2>&1) || return 1
+        | cg_pub "${CG_TOPIC}/${suffix}" 2>&1)
 }
 
 # --- Program crashes on the host -------------------------------------------------
@@ -89,15 +86,18 @@ crash_json() {
                + {time: (.__REALTIME_TIMESTAMP | tonumber / 1e6 | floor | todate)}'
 }
 
-# Prints the API payloads of both crash entities as "boot<TAB>json" and
-# "window<TAB>json"; $1 = window in hours
-crash_payloads() {
-    local boot recent
+# The crashes for the Crashes sensor and the web page, as one JSON object:
+# program crashes since boot (count) and within the window (the newest 50),
+# and the Home Assistant crashes the guard caught within the window, from its
+# events.log. $1 = window in hours, $2 = events.log
+crash_status() {
+    local boot recent cutoff ha
     boot=$(crash_json -b | wc -l | tr -d ' ')
     recent=$(crash_json --since "-$1h" | jq -sc '.')
-    printf 'boot\t%s\n' "$(jq -nc --arg n "${boot}" --arg name "${NAME_PREFIX}" \
-        '{state:$n, attributes:{friendly_name:($name + " Program crashes since boot")}}')"
-    printf 'window\t%s\n' "$(jq -c --argjson h "$1" --arg name "${NAME_PREFIX}" \
-        '{state:(length | tostring), attributes:{friendly_name:($name + " Program crashes (window)"),
-          window_hours:$h, last:(.[-10:] | reverse)}}' <<< "${recent}")"
+    cutoff=$(date -d "-$1 hours" -Iseconds)
+    ha=$(awk -v c="${cutoff}" '$1 > c && /Crash handled|NOT handled/' "$2" 2>/dev/null \
+        | jq -Rsc 'split("\n") | map(select(. != "") | capture("^(?<time>\\S+) (?<message>.*)$")) | reverse')
+    jq -nc --argjson h "$1" --argjson boot "${boot}" --argjson recent "${recent}" --argjson ha "${ha:-[]}" '
+        {window_hours:$h, boot:$boot, programs:($recent | .[-50:] | reverse), home_assistant:$ha,
+         problem:(($recent | length) + ($ha | length) > 0)}'
 }

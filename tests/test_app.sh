@@ -211,45 +211,56 @@ export PUBLISHED="${WORK}/published" RETAINED="${WORK}/retained"
 # Left by 1.2.0: single entity topics
 printf '%s\t%s\n' homeassistant/sensor/crash_guard/crashes_window/config '{"unique_id":"ha_host_crashes_window"}' \
     homeassistant/binary_sensor/crash_guard/memory_lock/config '{"unique_id":"crash_guard_memory_lock"}' > "${RETAINED}"
-ENTITY_PREFIX=host NAME_PREFIX='Home Assistant Host' SLUG=c3edd230_crash_guard APP_VERSION=1.2.0 \
-DISCOVERY_PREFIX=homeassistant PATH="/tests/stubs:${PATH}" bash -c '
+printf '%s\n' '2026-01-01T00:00:00+00:00 Crash handled: exit 139 (case old)' \
+    "$(date -Iseconds) Crash handled: exit 139, Home Assistant running again (case new)" \
+    "$(date -Iseconds) Crash (exit 139) NOT handled: limit of 3/h reached" \
+    "$(date -Iseconds) Check (no drop): no corrupted files in the cache" > "${WORK}/events.log"
+ENTITY_PREFIX=host NAME_PREFIX='Home Assistant Host' SLUG=c3edd230_crash_guard APP_VERSION=2.0.0 \
+DISCOVERY_PREFIX=homeassistant PATH="/tests/stubs:${PATH}" EVENTS="${WORK}/events.log" bash -c '
     bashio::log.info() { echo "$*" >> "${PUBLISHED}.log"; }
     sleep() { return 0; }
     declare -a MQ=(-h broker)
     source /usr/local/lib/crash-guard/entities.sh
-    cg_announce crashes_window memory_lock
+    cg_announce crashes memory_lock_problem
     : > "${RETAINED}"
-    cg_announce crashes_window
-    cg_drop_state memory_lock
-    cg_publish cache_corrupted "{\"state\":\"unknown\",\"attributes\":{\"friendly_name\":\"x\",\"icon\":\"y\",\"last_check\":null}}"
-    cg_publish crashes_handled "{\"state\":\"2\",\"attributes\":{\"window\":\"24 h\"}}"
-    crash_payloads 24 > "${PUBLISHED}.crashes"
+    cg_announce crashes
+    cg_drop_state memory_lock_problem
+    cg_publish corrupted_cache "{\"state\":\"unknown\",\"attributes\":{\"friendly_name\":\"x\"}}"
+    cg_publish crashes "{\"state\":\"on\",\"attributes\":{\"device_class\":\"problem\"}}"
+    crash_status 24 "${EVENTS}" > "${PUBLISHED}.crashes"
 ' 2> "${WORK}/entities.log"
 last() { awk -F '\t' -v t="$1" '$1 == t { v = $2 } END { print v }' "${PUBLISHED}"; }
 first() { awk -F '\t' -v t="$1" '$1 == t { print $2; exit }' "${PUBLISHED}"; }
 DEVICE=homeassistant/device/crash_guard/config
-window=$(first "${DEVICE}" | jq -c .components.crashes_window)
-expect 'crash window keeps its unique ID' "$(jq -r .unique_id <<< "${window}")" ha_host_crashes_window
-expect 'entity ID from the prefix' "$(jq -r .default_entity_id <<< "${window}")" sensor.host_crashes_window
+crashes=$(first "${DEVICE}" | jq -c .components.crashes)
+expect 'crashes is a problem sensor with on/off' \
+    "$(jq -r '.platform + .device_class + .payload_on + .payload_off' <<< "${crashes}")" binary_sensorproblemonoff
+expect 'entity ID from the prefix' "$(jq -r .default_entity_id <<< "${crashes}")" binary_sensor.host_crashes
+expect 'no attributes topic' "$(jq -r 'has("json_attributes_topic")' <<< "${crashes}")" false
 expect 'device named after name_prefix' "$(first "${DEVICE}" | jq -r '.device.name + "|" + .device.identifiers[0]')" 'Home Assistant Host|crash_guard'
-expect 'availability and origin' "$(first "${DEVICE}" | jq -r '.availability_topic + "|" + .origin.sw_version')" 'crash_guard/availability|1.2.0'
-expect 'memory lock is a binary sensor with on/off' \
-    "$(first "${DEVICE}" | jq -r '.components.memory_lock | .platform + .payload_on + .payload_off')" binary_sensoronoff
+expect 'availability and origin' "$(first "${DEVICE}" | jq -r '.availability_topic + "|" + .origin.sw_version')" 'crash_guard/availability|2.0.0'
 expect 'single entity topics of 1.2.0 migrated' "$(grep -c '{"migrate_discovery":true}' "${PUBLISHED}")" 2
 expect 'and cleared after the device message' \
     "$(last homeassistant/sensor/crash_guard/crashes_window/config)|$(last homeassistant/binary_sensor/crash_guard/memory_lock/config)" '|'
-expect 'memory lock removed with its platform only' \
-    "$(grep "^${DEVICE}	" "${PUBLISHED}" | sed -n 2p | cut -f2 | jq -c .components.memory_lock)" '{"platform":"binary_sensor"}'
-expect 'then left out' "$(last "${DEVICE}" | jq -c '.components | keys')" '["crashes_window"]'
-expect 'its state removed' "$(last crash_guard/memory_lock)|$(last crash_guard/memory_lock/attributes)" '|'
-expect 'unknown state is sent as None' "$(last crash_guard/cache_corrupted)" None
-expect 'attributes without name and icon' "$(last crash_guard/cache_corrupted/attributes)" '{"last_check":null}'
-expect 'state as text' "$(last crash_guard/crashes_handled)" 2
-expect 'program crashes since boot' "$(awk -F '\t' '$1 == "boot" { print $2 }' "${PUBLISHED}.crashes" | jq -r .state)" 2
+expect 'memory lock problem removed with its platform only' \
+    "$(grep "^${DEVICE}	" "${PUBLISHED}" | sed -n 2p | cut -f2 | jq -c .components.memory_lock_problem)" '{"platform":"binary_sensor"}'
+expect 'then left out' "$(last "${DEVICE}" | jq -c '.components | keys')" '["crashes"]'
+expect 'its state removed' "$(last crash_guard/memory_lock_problem)|$(last crash_guard/memory_lock_problem/attributes)" '|'
+expect 'unknown state is sent as None' "$(last crash_guard/corrupted_cache)" None
+expect 'state only, no attributes' "$(last crash_guard/crashes)|$(last crash_guard/crashes/attributes)" 'on|'
+status=$(cat "${PUBLISHED}.crashes")
+expect 'program crashes since boot' "$(jq -r .boot <<< "${status}")" 2
 expect 'program crashes in the window, newest first' \
-    "$(awk -F '\t' '$1 == "window" { print $2 }' "${PUBLISHED}.crashes" | jq -c '[.state, .attributes.window_hours, (.attributes.last | map(.process + "/" + .signal))]')" \
-    '["2",24,["curl/7/BUS","python3/11/SEGV"]]'
+    "$(jq -c '[.window_hours, (.programs | map(.process + "/" + .signal))]' <<< "${status}")" '[24,["curl/7/BUS","python3/11/SEGV"]]'
+expect 'Home Assistant crashes in the window, handled or not, newest first' \
+    "$(jq -r '.home_assistant | map(.message | split(" ")[0:2] | join(" ")) | join("|")' <<< "${status}")" 'Crash (exit|Crash handled:'
+expect 'a crash is a problem' "$(jq -r .problem <<< "${status}")" true
 expect 'no errors' "$(cat "${WORK}/entities.log")" ''
+: > "${WORK}/quiet.log"
+CG_FIXTURES="${WORK}" PATH="/tests/stubs:${PATH}" bash -c '
+    source /usr/local/lib/crash-guard/entities.sh 2> /dev/null
+    crash_status 24 /nonexistent' > "${WORK}/quiet.json" 2> "${WORK}/quiet.log"
+expect 'no crash, no problem' "$(jq -c '[.boot, (.programs | length), (.home_assistant | length), .problem]' "${WORK}/quiet.json")" '[0,0,0,false]'
 
 echo '# Entities while the MQTT broker is away'
 : > "${PUBLISHED}"; rm -f "${PUBLISHED}.calls"
@@ -257,12 +268,11 @@ ENTITY_PREFIX=host NAME_PREFIX='Home Assistant Host' SLUG=c3edd230_crash_guard \
 DISCOVERY_PREFIX=homeassistant PATH="/tests/stubs:${PATH}" PUB_FAIL=1 bash -c '
     declare -a MQ=(-h broker)
     source /usr/local/lib/crash-guard/entities.sh
-    cg_publish crashes_handled "{\"state\":\"2\",\"attributes\":{\"window\":\"24 h\"}}" && echo sent || echo "failed: ${PUB_ERROR}"
-    cg_publish crashes_handled "{\"state\":\"3\",\"attributes\":{\"window\":\"24 h\"}}" && echo sent || echo "failed: ${PUB_ERROR}"
+    cg_publish crashes "{\"state\":\"off\"}" && echo sent || echo "failed: ${PUB_ERROR}"
+    cg_publish crashes "{\"state\":\"on\"}" && echo sent || echo "failed: ${PUB_ERROR}"
 ' > "${WORK}/away.out" 2> "${WORK}/away.log"
 expect 'a state the broker does not take fails, with the reason' "$(sed -n 1p "${WORK}/away.out")" 'failed: Error: Connection refused'
-expect 'and stops before its attributes' "$(cat "${PUBLISHED}.calls")|$(grep -c '' "${PUBLISHED}")" '3|2'
-expect 'sent once the broker is back' "$(sed -n 2p "${WORK}/away.out")|$(last crash_guard/crashes_handled)" 'sent|3'
+expect 'sent once the broker is back' "$(sed -n 2p "${WORK}/away.out")|$(last crash_guard/crashes)" 'sent|on'
 expect 'no raw errors' "$(cat "${WORK}/away.log")" ''
 rm -f "${PUBLISHED}.calls"
 

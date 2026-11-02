@@ -37,22 +37,36 @@ echo '# Hand-over from the single entity discovery of 1.2.0'
 for e in sensor/crash_guard/crashes_window binary_sensor/crash_guard/memory_lock; do
     jq -nc --arg e "${e}" '{unique_id:$e}' | mosquitto_pub -h broker -r -t "homeassistant/${e}/config" -s
 done
-entities 'cg_announce cache_corrupted crashes_handled crashes_boot crashes_window memory_lock'
+entities 'cg_announce corrupted_cache crashes memory_lock_problem'
 expect 'device message with every entity' "$(retained "${DEVICE}" | jq -c '.components | keys')" \
-    '["cache_corrupted","crashes_boot","crashes_handled","crashes_window","memory_lock"]'
+    '["corrupted_cache","crashes","memory_lock_problem"]'
+expect 'problem sensors' "$(retained "${DEVICE}" | jq -r '[.components[].device_class] | unique | join(" ")')" problem
 expect 'old topics removed' \
     "$(retained homeassistant/sensor/crash_guard/crashes_window/config)$(retained homeassistant/binary_sensor/crash_guard/memory_lock/config)" ''
 expect 'hand-over logged' "$(grep -c '2 entities of crash_guard moved to device discovery' "${WORK}/log")" 1
 
 echo '# Removing an entity'
-entities 'cg_announce cache_corrupted crashes_handled crashes_boot crashes_window; cg_drop_state memory_lock'
-expect 'memory lock left out' "$(retained "${DEVICE}" | jq -c '.components | has("memory_lock")')" false
-expect 'its state removed' "$(retained crash_guard/memory_lock)" ''
+entities 'cg_publish memory_lock_problem "{\"state\":\"off\"}"'
+entities 'cg_announce corrupted_cache crashes; cg_drop_state memory_lock_problem'
+expect 'memory lock left out' "$(retained "${DEVICE}" | jq -c '.components | has("memory_lock_problem")')" false
+expect 'its state removed' "$(retained crash_guard/memory_lock_problem)" ''
+
+echo '# The entities before 2.0.0'
+printf '{"components":{"crashes_window":{"platform":"sensor","unique_id":"ha_host_crashes_window"},"crashes":{"platform":"binary_sensor","unique_id":"crash_guard_crashes"}}}' \
+    | mosquitto_pub -h broker -r -t "${DEVICE}" -s
+printf '3' | mosquitto_pub -h broker -r -t crash_guard/crashes_window -s
+printf '{"last":[]}' | mosquitto_pub -h broker -r -t crash_guard/crashes_window/attributes -s
+entities 'cg_announce corrupted_cache crashes; for e in ${CG_OLD_STATES}; do cg_drop_state "${e}"; done'
+expect 'old entity left out' "$(retained "${DEVICE}" | jq -c '.components | has("crashes_window")')" false
+expect 'old state and attributes removed' \
+    "$(retained crash_guard/crashes_window)$(retained crash_guard/crashes_window/attributes)" ''
 
 echo '# States'
-entities 'cg_publish cache_corrupted "{\"state\":\"unknown\",\"attributes\":{\"friendly_name\":\"x\",\"last_check\":null}}"'
-expect 'unknown state as None' "$(retained crash_guard/cache_corrupted)" None
-expect 'attributes without the name' "$(retained crash_guard/cache_corrupted/attributes)" '{"last_check":null}'
+entities 'cg_publish corrupted_cache "{\"state\":\"unknown\",\"attributes\":{\"friendly_name\":\"x\"}}"'
+expect 'unknown state as None' "$(retained crash_guard/corrupted_cache)" None
+entities 'cg_publish crashes "{\"state\":\"on\"}"'
+expect 'problem on' "$(retained crash_guard/crashes)" on
+expect 'no attributes topic' "$(retained crash_guard/crashes/attributes)" ''
 
 if (( FAILED )); then
     echo '--- log:'

@@ -1,0 +1,7 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# The web page behind Home Assistant's ingress; it only reads the private data
+# ==============================================================================
+bashio::log.info 'Starting the web page'
+exec python3 /usr/local/lib/crash_guard_web.py

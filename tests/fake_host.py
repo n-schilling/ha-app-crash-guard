@@ -9,13 +9,11 @@ through files in <dir>:
   protected     present: the app runs in protection mode
   ha_stopped    present: the Home Assistant container is not running; a
                 POST /core/start removes it
-What a case would publish to /share is copied to <dir>/published.
 Helper containers answer with the last line their command would print.
 """
 
 import json
 import os
-import shutil
 import socketserver
 import sys
 import threading
@@ -46,8 +44,6 @@ def helper_output(entrypoint, cmd):
     script = " ".join(cmd)
     if "drop_caches" in script:
         return "dropped"
-    if "crash_guard" in script:      # to_share
-        return "done"
     return ""
 
 
@@ -116,11 +112,6 @@ class Docker(Handler):
         if path == "/containers/create":
             helper_id = f"helper{len(HELPERS) + 1}"
             HELPERS[helper_id] = body
-            cmd = body.get("Cmd") or []
-            # publish_case: keep what would reach /share, for the test to look at
-            # (Cmd: -c <script> to_share <case name> <case folder> ...)
-            if any("mkdir --" in part for part in cmd) and len(cmd) >= 5 and os.path.isdir(cmd[4]):
-                shutil.copytree(cmd[4], DIR / "published" / cmd[3], symlinks=True)
             return self.reply(201, {"Id": helper_id})
         parts = path.strip("/").split("/")
         if len(parts) >= 2 and parts[0] == "containers" and parts[1] in HELPERS:

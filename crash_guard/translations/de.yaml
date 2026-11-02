@@ -31,13 +31,10 @@ configuration:
     description: Name des Geräts in Home Assistant; die Entitätsnamen beginnen damit.
   crash_window_hours:
     name: Absturz-Fenster
-    description: Stunden, die der Sensor „Program crashes (window)“ zurückblickt.
-  publish_evidence:
-    name: Absturz-Beweise freigeben
-    description: Kopiert auch die Logs eines Absturzes (Home Assistant, Kernel, Coredumps) nach /share/crash_guard, wo andere Apps sie lesen können. Aus behält sie in den privaten Daten der App.
+    description: Stunden, die der Sensor „Crashes“ und die Webseite auf Abstürze zurückblicken.
   cases_to_keep:
     name: Aufbewahrte Fälle
-    description: Wie viele Fall-Ordner (Prüfungen, Abstürze) aufbewahrt werden, in /share/crash_guard und in den privaten Daten der App; ältere werden gelöscht.
+    description: Wie viele Fälle (Prüfungen, Abstürze) die App für ihre Webseite aufbewahrt; ältere werden gelöscht.
   discovery_prefix:
     name: MQTT-Discovery-Präfix
     description: Präfix, auf dem Home Assistant MQTT-Discovery empfängt.

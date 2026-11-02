@@ -27,6 +27,7 @@ jobs:
         run: >-
           shellcheck --shell=bash --severity=warning --external-sources
           crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run
+          crash_guard/rootfs/etc/s6-overlay/s6-rc.d/web/run
           crash_guard/rootfs/usr/local/bin/cg-hash.sh
           crash_guard/rootfs/usr/local/lib/crash-guard/lock.sh
           crash_guard/rootfs/usr/local/lib/crash-guard/entities.sh
@@ -34,8 +35,8 @@ jobs:
           crash_guard/rootfs/usr/local/lib/mqtt-device.sh
           tests/test_broker.sh tests/test_guard.sh tests/stubs/*
           tests/test_app.sh
-      - name: Python syntax
-        run: python3 -m py_compile crash_guard/rootfs/usr/local/bin/*.py tests/fake_host.py
+      - name: Python
+        run: pipx run ruff==0.17.3 check crash_guard/rootfs/usr/local tests
 
   test:
     name: Build and test (${{ matrix.arch }})
@@ -77,6 +78,13 @@ jobs:
           docker run --rm --network none --platform "${PLATFORM}" --add-host supervisor:127.0.0.1
           -v "${PWD}/tests:/tests:ro" --entrypoint bash crash-guard:test
           /tests/test_guard.sh
+      - name: Test the web page
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: >-
+          docker run --rm --network none --platform "${PLATFORM}"
+          -v "${PWD}/tests:/tests:ro" --entrypoint python3 crash-guard:test
+          -m unittest discover -v -s /tests -p 'test_*.py'
 
   broker:
     name: Against a real MQTT broker

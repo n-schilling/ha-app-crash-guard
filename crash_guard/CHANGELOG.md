@@ -2,6 +2,18 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-02
+
+### Added
+
+- A page in the Home Assistant sidebar (ingress) with everything the app found: the state of the memory lock, the last cache check and the crashes, the known defective pages, the cases with the files that differed and the evidence of a crash, the event log and the cache checks. The page only reads; a log of a crash loads only when it is opened
+
+### Changed
+
+- **Breaking:** the five entities are replaced by three problem sensors, `binary_sensor.<prefix>_memory_lock_problem`, `binary_sensor.<prefix>_corrupted_cache` and `binary_sensor.<prefix>_crashes`; the figures behind them are on the page. The old entities are removed from the MQTT device and their retained states cleared; automations that used them need the new ones
+- **Breaking:** nothing is written to `/share` any more; cases and logs stay in the app's private data, where the page shows them. A case keeps the files that differed and their hashes, not the full hash lists. The option `publish_evidence` is gone
+- Crashes of Home Assistant the app did not handle, because the restart limit was reached, count as crashes too, and the crash window (`crash_window_hours`) applies to them as to program crashes
+
 ## [1.5.6] - 2026-10-27
 
 ### Changed

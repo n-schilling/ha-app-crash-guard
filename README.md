@@ -11,10 +11,11 @@
 
 A Home Assistant app (formerly add-on) for everything about crashes on a Home Assistant OS host:
 
-- counts crashes of every host program, whatever their cause, as sensors;
+- counts crashes of every host program, whatever their cause;
 - catches crashes of Home Assistant itself, saves evidence and brings it back up;
 - checks the page cache for corrupted files, the typical trace of defective RAM;
-- on a Raspberry Pi, locks defective RAM pages away from Linux through the device tree, so the host keeps running until the board is replaced.
+- on a Raspberry Pi, locks defective RAM pages away from Linux through the device tree, so the host keeps running until the board is replaced;
+- shows all of it on its own page in Home Assistant, and reports three problem sensors for automations.
 
 > [!WARNING]
 > Crash Guard needs the Docker API, privileged helper containers, the Supervisor API as manager, the host journal and, for the RAM lock, write access to the boot configuration. Together that is full control over the host. Read [what the app may do](crash_guard/DOCS.md#read-this-first-what-the-app-may-do) before installing it.
@@ -34,7 +35,7 @@ A Home Assistant app (formerly add-on) for everything about crashes on a Home As
 2. Open the app from the app store.
 3. Install **Crash Guard**, turn off its **Protection mode**, review the options and start it. Crash Guard needs the Docker API, which protection mode withholds; with it on, the app stops with a message saying so.
 
-See [the documentation](crash_guard/DOCS.md) for how it works, what it touches, its entities and troubleshooting. Changes are listed in the [changelog](crash_guard/CHANGELOG.md).
+See [the documentation](crash_guard/DOCS.md) for how it works, what it touches, its page, its entities and troubleshooting. Changes are listed in the [changelog](crash_guard/CHANGELOG.md).
 
 ## Support
 
