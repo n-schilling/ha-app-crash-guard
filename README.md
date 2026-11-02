@@ -9,7 +9,7 @@
 
 ![Crash Guard](crash_guard/logo.png)
 
-A Home Assistant app (formerly add-on) for everything about crashes on a Home Assistant OS host:
+A Home Assistant app for everything about crashes on a Home Assistant OS host:
 
 - counts crashes of every host program, whatever their cause;
 - catches crashes of Home Assistant itself, saves evidence and brings it back up;
@@ -26,7 +26,7 @@ A Home Assistant app (formerly add-on) for everything about crashes on a Home As
 
    [![Add the repository to My Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fn-schilling%2Fha-app-crash-guard)
 
-   Or add it manually: **Settings → Apps → Install app → ⋮ → Repositories** (before Home Assistant 2026.2: **Settings → Add-ons → Add-on store**), then paste:
+   Or add it manually: **Settings → Apps → Install app → ⋮ → Repositories**, then paste:
 
    ```text
    https://github.com/n-schilling/ha-app-crash-guard
