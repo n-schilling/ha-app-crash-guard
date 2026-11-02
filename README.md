@@ -20,6 +20,16 @@ A Home Assistant app for everything about crashes on a Home Assistant OS host:
 > [!WARNING]
 > Crash Guard needs the Docker API, privileged helper containers, the Supervisor API as manager, the host journal and, for the RAM lock, write access to the boot configuration. Together that is full control over the host. Read [what the app may do](crash_guard/DOCS.md#read-this-first-what-the-app-may-do) before installing it.
 
+## The web page
+
+The page (**Open web UI** on the app's page, or in the sidebar with **Show in sidebar**) looks like Home Assistant's settings and takes over the theme in use. The screenshots show made-up demo data.
+
+| Overview | Cases and event log |
+|---|---|
+| ![Status, crashes and the memory lock with its defective pages](docs/screenshots/overview.png) | ![Cases, event log and cache checks](docs/screenshots/cases.png) |
+| **A Home Assistant crash** | **A cache check that found a corrupted file** |
+| ![Exit code, the file that differed, saved copy and evidence of a crash](docs/screenshots/crash.png) | ![The file that differed at a check and its saved copy](docs/screenshots/check.png) |
+
 ## Installation
 
 1. Add the repository to your Home Assistant instance:
