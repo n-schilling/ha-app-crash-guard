@@ -2,6 +2,12 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-11-02
+
+### Fixed
+
+- The update to 2.0.0 left one "Erroneous JSON" warning per old entity in the Home Assistant log: their retained attributes were cleared while Home Assistant still followed them. The old states are now cleared after the device message has removed those entities
+
 ## [2.0.0] - 2026-11-02
 
 ### Added

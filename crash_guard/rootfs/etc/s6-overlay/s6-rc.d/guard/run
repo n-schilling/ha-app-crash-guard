@@ -604,11 +604,6 @@ if (( MQTT )); then
     hold_availability &
     HOLDER=$!
     trap stop EXIT TERM INT
-    # The device message drops the entities before 2.0.0; their retained
-    # states go too
-    for e in ${CG_OLD_STATES}; do
-        cg_drop_state "${e}"
-    done
     entities=(corrupted_cache crashes)
     if (( ${#LOCK_BLOCKS[@]} > 0 )); then
         entities+=(memory_lock_problem)
@@ -616,6 +611,11 @@ if (( MQTT )); then
         cg_drop_state memory_lock_problem
     fi
     cg_announce "${entities[@]}"
+    # The device message has dropped the entities before 2.0.0; only now go
+    # their retained states, which Home Assistant would else still read
+    for e in ${CG_OLD_STATES}; do
+        cg_drop_state "${e}"
+    done
     printf 'online' | cg_pub "${CG_AVAIL}"
     bashio::log.info 'Entities announced through MQTT discovery'
 else
