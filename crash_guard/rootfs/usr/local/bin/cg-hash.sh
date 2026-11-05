@@ -6,6 +6,12 @@
 # and saves differing files right away.
 #
 # cg-hash.sh <layers file> <output.sha> [reference.sha] [copy directory]
+#
+# A file that differs from the reference is read once more straight from the
+# drive (O_DIRECT, past the page cache). Equal to what the cache held, it was
+# changed on the drive - for example a package Home Assistant installed - and
+# goes to <output>.changed instead of <output>.mismatch. Only a difference
+# between the cache and the drive is a corruption in RAM.
 # ==============================================================================
 set -uo pipefail
 layers=$1 out=$2 ref=${3:-} copy=${4:-}
@@ -40,10 +46,29 @@ done | xargs -0 -r sha256sum > "${out}"
 
 [[ -n "${ref}" && -s "${ref}" ]] || { echo "hashed=$(wc -l < "${out}") mismatches=-"; exit 0; }
 
+# Hash of the file as it is on the drive; empty if O_DIRECT is not possible
+direct_hash() {
+    local h
+    h=$(dd if="$1" iflag=direct bs=1M status=none | sha256sum) || return 1
+    echo "${h%% *}"
+}
+
 # Output: path expected-hash actual-hash
 awk 'NR == FNR { r[$2] = $1; next } ($2 in r) && r[$2] != $1 { print $2, r[$2], $1 }' \
-    "${ref}" "${out}" > "${out%.sha}.mismatch"
+    "${ref}" "${out}" > "${out%.sha}.differ"
+: > "${out%.sha}.mismatch"
+: > "${out%.sha}.changed"
+while read -r path expected actual; do
+    # Not readable from the drive: counted as corrupted, never silently adopted
+    if in_layers "${path}" && [[ "$(direct_hash "${path}")" == "${actual}" ]]; then
+        echo "${path} ${expected} ${actual}" >> "${out%.sha}.changed"
+    else
+        echo "${path} ${expected} ${actual}" >> "${out%.sha}.mismatch"
+    fi
+done < "${out%.sha}.differ"
+rm -f "${out%.sha}.differ"
 n=$(wc -l < "${out%.sha}.mismatch")
+c=$(wc -l < "${out%.sha}.changed")
 
 if [[ -n "${copy}" && "${n}" -gt 0 ]]; then
     mkdir -p "${copy}"
@@ -55,4 +80,4 @@ if [[ -n "${copy}" && "${n}" -gt 0 ]]; then
             "${copy}/$(tr '/' '_' <<< "${path#/mnt/data/docker/overlay2/}")" || true
     done < "${out%.sha}.mismatch"
 fi
-echo "hashed=$(wc -l < "${out}") mismatches=${n}"
+echo "hashed=$(wc -l < "${out}") mismatches=${n} changed=${c}"

@@ -138,11 +138,44 @@ printf '%s\n' "${layer}" "${init}" "${WORK}/evil" "${L}/../../../..${WORK}/evil"
 r=$(bash /usr/local/bin/cg-hash.sh "${WORK}/layers.txt" "${WORK}/ref.sha")
 expect 'hashes the files of the layers' "${r}" 'hashed=3 mismatches=-'
 expect 'never reads outside the Docker layers' "$(grep -c secret "${WORK}/ref.sha")" 0
+# The drive is simulated by a dd stub (O_DIRECT is not possible on every
+# file system a test container runs on): DISK=same reads the file, DISK=other
+# returns other content (the cache was corrupted), DISK=fail cannot read
+mkdir -p "${WORK}/bin"
+cat > "${WORK}/bin/dd" <<'STUB'
+#!/bin/bash
+for a in "$@"; do [[ "${a}" == if=* ]] && f=${a#if=}; done
+case "${DISK}" in
+    same) cat -- "${f}" ;;
+    other) echo 'what the drive holds' ;;
+    *) echo 'dd: O_DIRECT not supported' >&2; exit 1 ;;
+esac
+STUB
+chmod +x "${WORK}/bin/dd"
+hash_with() {
+    DISK=$1 PATH="${WORK}/bin:${PATH}" bash /usr/local/bin/cg-hash.sh "${WORK}/layers.txt" \
+        "${WORK}/$2/cache.sha" "${WORK}/ref.sha" "${WORK}/$2/files"
+}
 echo changed > "${layer}/usr/lib/a.so"
-r=$(bash /usr/local/bin/cg-hash.sh "${WORK}/layers.txt" "${WORK}/case/cache.sha" "${WORK}/ref.sha" "${WORK}/case/files")
-expect 'finds the changed file' "${r}" 'hashed=3 mismatches=1'
+expect 'cache differs from the drive: corrupted' "$(hash_with other case)" 'hashed=3 mismatches=1 changed=0'
 expect 'lists it in the mismatch file' "$(cut -d' ' -f1 "${WORK}/case/cache.mismatch")" "${layer}/usr/lib/a.so"
 expect 'keeps a copy of it' "$(cat "${WORK}/case/files/"*a.so)" changed
+mkdir -p "${WORK}/case3" "${WORK}/case4"
+expect 'cache equals the drive: changed on the drive' "$(hash_with same case3)" 'hashed=3 mismatches=0 changed=1'
+expect 'lists it with both hashes' "$(cut -d' ' -f1 "${WORK}/case3/cache.changed")|$(wc -w < "${WORK}/case3/cache.changed" | tr -d ' ')" "${layer}/usr/lib/a.so|3"
+expect 'keeps no copy of a changed file' "$([[ -d "${WORK}/case3/files" ]] && echo copied || echo none)" none
+expect 'drive not readable: counted as corrupted' "$(hash_with fail case4)" 'hashed=3 mismatches=1 changed=0'
+
+echo '# Reference update (ref.sh)'
+# shellcheck source=/dev/null
+source /usr/local/lib/crash-guard/ref.sh
+cp "${WORK}/ref.sha" "${WORK}/ref2.sha"
+b_line=$(grep 'b.py' "${WORK}/ref2.sha")
+expect 'takes the new hash of a changed file' "$(adopt_changes "${WORK}/ref2.sha" "${WORK}/case3/cache.changed")" 1
+expect 'the reference has it' "$(grep 'a.so' "${WORK}/ref2.sha")" "$(sha256sum "${layer}/usr/lib/a.so")"
+expect 'other entries stay' "$(grep 'b.py' "${WORK}/ref2.sha")|$(wc -l < "${WORK}/ref2.sha" | tr -d ' ')" "${b_line}|3"
+expect 'a stale line (other expected hash) is ignored' "$(adopt_changes "${WORK}/ref2.sha" "${WORK}/case3/cache.changed")" 0
+expect 'nothing changed: nothing to do' "$(adopt_changes "${WORK}/ref2.sha" /nonexistent)" 0
 
 echo '# Hash helper: names that try to smuggle in other paths'
 other=${L}/$(printf 'c%.0s' {1..64})/diff

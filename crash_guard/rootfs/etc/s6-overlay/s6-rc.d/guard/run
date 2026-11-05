@@ -95,6 +95,8 @@ curl -sf -o /dev/null -X POST -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
 # --- Entities: MQTT when a broker is available ---------------------------------
 # shellcheck source=../../../../usr/local/lib/crash-guard/entities.sh
 source /usr/local/lib/crash-guard/entities.sh
+# shellcheck source=../../../../usr/local/lib/crash-guard/ref.sh
+source /usr/local/lib/crash-guard/ref.sh
 MQTT=0
 declare -a MQ=()
 DISCOVERY_PREFIX=$(bashio::config 'discovery_prefix')
@@ -208,6 +210,15 @@ locate_pages() {
     event "Physical addresses located (${2}): ${r} -> $(known_pages)"
 }
 
+# Files that changed on the drive since the reference was built (for example
+# packages Home Assistant installed for an integration): their new hashes go
+# into the reference, they are no corruption. $1 = reference, $2 = .changed
+take_changes() {
+    local n
+    n=$(adopt_changes "$1" "$2")
+    [[ "${n}" == 0 ]] || event "Reference updated: ${n} file(s) changed on the drive, not in RAM"
+}
+
 # Defective pages known so far: "PFN(count)" by frequency
 known_pages() {
     [[ -n "$(logged_pfns "${PRIV}/badpages.log")" ]] || { echo 'none'; return; }
@@ -256,9 +267,11 @@ scheduled_drop() {
     fi
     d=$(new_case drop)
     r1=$(run_helper "${LAYERS}" "${WORK}/cache.sha" "${ref}" "${WORK}/cache_files")
+    take_changes "${ref}" "${WORK}/cache.changed"
     locate_pages "${WORK}/cache.mismatch" drop-cache
     drop_cache
     r2=$(run_helper "${LAYERS}" "${WORK}/fresh.sha" "${ref}" "${WORK}/fresh_files")
+    take_changes "${ref}" "${WORK}/fresh.changed"
     locate_pages "${WORK}/fresh.mismatch" drop-fresh
     echo "$(date -Iseconds) cache=$(count_of "${r1}") fresh=$(count_of "${r2}")" >> "${PRIV}/drops.log"
     if [[ "$(count_of "${r1}")" == 0 && "$(count_of "${r2}")" == 0 ]]; then
@@ -279,6 +292,7 @@ scheduled_check() {
     local ref=$1 d r1 n
     d=$(new_case check)
     r1=$(run_helper "${LAYERS}" "${WORK}/cache.sha" "${ref}" "${WORK}/cache_files")
+    take_changes "${ref}" "${WORK}/cache.changed"
     n=$(count_of "${r1}")
     locate_pages "${WORK}/cache.mismatch" check-cache
     echo "$(date -Iseconds) cache=${n} fresh=- (no drop)" >> "${PRIV}/drops.log"
@@ -537,6 +551,7 @@ handle_crash() {
     ref=$(prepare_layers)
     if [[ -s "${ref}" ]]; then
         r1=$(run_helper "${LAYERS}" "${WORK}/cache.sha" "${ref}" "${WORK}/cache_files")
+        take_changes "${ref}" "${WORK}/cache.changed"
         locate_pages "${WORK}/cache.mismatch" crash-cache
     else
         run_helper "${LAYERS}" "${WORK}/cache.sha" >/dev/null
@@ -557,6 +572,7 @@ handle_crash() {
     # 3. Follow-up check with freshly read files
     if [[ -s "${ref}" ]]; then
         r2=$(run_helper "${LAYERS}" "${WORK}/fresh.sha" "${ref}" "${WORK}/fresh_files")
+        take_changes "${ref}" "${WORK}/fresh.changed"
         locate_pages "${WORK}/fresh.mismatch" crash-fresh
     fi
     keep_case "${d}"

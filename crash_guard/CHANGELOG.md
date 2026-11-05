@@ -2,6 +2,12 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-11-05
+
+### Fixed
+
+- A file that changed on the drive after the reference was built, such as a package Home Assistant installs for an integration, was reported as corrupted in RAM. A file that differs from the reference is now read once more straight from the drive: if the drive holds what the cache held, the file changed on the drive, its new hash goes into the reference and nothing is reported. Only a difference between the cache and the drive counts as a corruption; a file that cannot be read from the drive still does
+
 ## [2.0.1] - 2026-11-02
 
 ### Fixed
