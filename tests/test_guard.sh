@@ -2,7 +2,8 @@
 # Tests the guard service itself against a fake host (tests/fake_host.py):
 # the start, the protection mode check, the status entities, a crash of Home
 # Assistant with evidence kept as a case, cache drop, restart and
-# notification, the restart limit and an intended stop. Run inside the built image, as root:
+# notification, the restart limit, an intended stop and a check requested on
+# the page. Run inside the built image, as root:
 #   docker run --rm --add-host supervisor:127.0.0.1 -v "$PWD/tests:/tests:ro" \
 #     --entrypoint bash <image> /tests/test_guard.sh
 # journalctl is a stub; there is no MQTT broker, so the entities are states
@@ -138,6 +139,24 @@ event kill -
 event die 139
 wait_for 'events_log | grep -q "after an intended stop"' 15
 expect 'exit after a stop only logged' "$(events_log | grep -c 'after an intended stop - only logged')" 1
+
+echo '# Check requested on the page'
+drops_before=$(requests "${drop}" | wc -l | tr -d ' ')
+# The fake helper hashes nothing: an empty reference, the request is skipped
+touch /data/crash_guard/check.request
+wait_for 'events_log | grep -q "requested on the page skipped"' 15
+expect 'without a reference: skipped' "$(events_log | grep -c 'skipped: no reference')" 1
+for ref in /data/crash_guard/ref/*.sha; do echo "$(printf '0%.0s' {1..64})  /x" > "${ref}"; done
+touch /data/crash_guard/check.request
+wait_for 'events_log | grep -q "Check (no drop)"' 30
+expect 'request taken' "$([[ -e /data/crash_guard/check.request ]] && echo left || echo taken)" taken
+expect 'checked on request' "$(events_log | grep -c 'Check requested on the page$')" 1
+expect 'without dropping the cache' "$(requests "${drop}" | wc -l | tr -d ' ')" "${drops_before}"
+expect 'checked once' "$(events_log | grep -c 'Check (no drop)')" 1
+expect 'no running marker left' "$([[ -e /data/crash_guard/check.running ]] && echo left || echo none)" none
+touch /data/crash_guard/check.request
+wait_for 'events_log | grep -q "requested on the page ignored"' 15
+expect 'a second request within 10 minutes is ignored' "$(events_log | grep -c 'Check (no drop)')" 1
 
 echo '# Stop'
 kill -TERM "${GUARD}"

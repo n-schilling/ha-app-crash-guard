@@ -71,6 +71,18 @@ class Fixture(unittest.TestCase):
 
 
 class Overview(Fixture):
+    def test_check_button(self) -> None:
+        self.assertRegex(self.page(), r'<button class="text" id="check-now"[^>]*>Check now</button>')
+        self.assertNotRegex(self.page(), r'id="check-now"[^>]* disabled')
+        (self.data / w.REQUESTED).write_text(f"{NOW - 60:.0f}\n")
+        page = self.page(lang="de")
+        self.assertIn("Wieder möglich um ", page)
+        self.assertRegex(page, r'id="check-now"[^>]* disabled>Jetzt prüfen')
+        (self.data / w.REQUEST).touch()
+        self.assertIn("Check requested, starts within a few seconds", self.page())
+        (self.data / w.RUNNING).touch()
+        self.assertIn("Check running", self.page())
+
     def test_problem_lines(self) -> None:
         page = self.page()
         self.assertIn("In effect: 0x1cc400000-0x1cc5fffff (2 MB)", page)
@@ -179,15 +191,6 @@ class Server(Fixture):
         self.server.server_close()
         super().tearDown()
 
-    def get(self, path: str, method: str = "GET"):
-        request = urllib.request.Request(self.url + path, method=method, data=b"{}" if method != "GET" else None)
-        try:
-            with urllib.request.urlopen(request) as answer:
-                return answer.status, dict(answer.headers), answer.read().decode()
-        except urllib.error.HTTPError as err:
-            with err:
-                return err.code, dict(err.headers), err.read().decode()
-
     def test_page(self) -> None:
         code, headers, body = self.get("/")
         self.assertEqual(code, 200)
@@ -201,10 +204,44 @@ class Server(Fixture):
         self.assertEqual(body, "token=<b>secret</b>\n")
         self.assertEqual(self.get(f"/?case={CRASH}&file=kernel.txt")[0], 404)
 
-    def test_read_only(self) -> None:
-        for method in ("POST", "PUT", "DELETE", "PATCH"):
+    def get(self, path: str, method: str = "GET", headers: dict | None = None):
+        request = urllib.request.Request(self.url + path, method=method, headers=headers or {},
+                                         data=b"" if method != "GET" else None)
+        try:
+            with urllib.request.urlopen(request) as answer:
+                return answer.status, dict(answer.headers), answer.read().decode()
+        except urllib.error.HTTPError as err:
+            with err:
+                return err.code, dict(err.headers), err.read().decode()
+
+    def test_no_other_changes(self) -> None:
+        for method in ("PUT", "DELETE", "PATCH"):
             code, headers, _ = self.get("/", method)
-            self.assertEqual((code, headers.get("Allow")), (405, "GET"), method)
+            self.assertEqual((code, headers.get("Allow")), (405, "GET, POST"), method)
+
+    def test_check_request_needs_the_header(self) -> None:
+        self.assertEqual(self.get("/", "POST")[0], 403)
+        self.assertEqual(self.get("/", "POST", {"X-Crash-Guard": "other"})[0], 403)
+        self.assertFalse((self.data / w.REQUEST).exists())
+
+    def test_check_request_once_per_gap(self) -> None:
+        check = {"X-Crash-Guard": "check"}
+        self.assertEqual(self.get("/", "POST", check)[0], 202)
+        self.assertTrue((self.data / w.REQUEST).is_file())
+        # still waiting for the guard service
+        self.assertEqual(self.get("/", "POST", check)[0], 429)
+        # taken by the guard service, but within the gap
+        (self.data / w.REQUEST).unlink()
+        self.assertEqual(self.get("/", "POST", check)[0], 429)
+        self.assertFalse((self.data / w.REQUEST).exists())
+        (self.data / w.REQUESTED).write_text(f"{w.time.time() - w.MANUAL_GAP - 1:.0f}\n")
+        self.assertEqual(self.get("/", "POST", check)[0], 202)
+
+    def test_check_request_never_follows_a_symlink(self) -> None:
+        target = self.root / "elsewhere"
+        (self.data / w.REQUEST).symlink_to(target)
+        self.assertEqual(self.get("/", "POST", {"X-Crash-Guard": "check"})[0], 429)
+        self.assertFalse(target.exists())
 
     def test_other_paths(self) -> None:
         self.assertEqual(self.get("/cases/" + CRASH)[0], 404)

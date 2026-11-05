@@ -306,6 +306,34 @@ scheduled_check() {
     fi
 }
 
+# A check requested on the web page: the page leaves REQUEST, the guard takes
+# it on its next round. Always a check WITHOUT dropping the cache, whatever
+# drop_on_schedule says, and at most one per MANUAL_GAP seconds - the page
+# enforces that too, this is the guard's own limit. RUNNING tells the page that
+# the check is under way.
+readonly REQUEST="${PRIV}/check.request" RUNNING="${PRIV}/check.running" MANUAL_GAP=600
+LAST_MANUAL=0
+
+requested_check() {
+    local ref
+    [[ -e "${REQUEST}" || -L "${REQUEST}" ]] || return 1
+    rm -f -- "${REQUEST}"
+    if (( $(date +%s) - LAST_MANUAL < MANUAL_GAP )); then
+        event 'Check requested on the page ignored: the last one was less than 10 minutes ago'
+        return 0
+    fi
+    ref=$(prepare_layers)
+    if [[ -z "${ref}" || ! -s "${ref}" ]]; then
+        event 'Check requested on the page skipped: no reference for the current Home Assistant image yet'
+        return 0
+    fi
+    LAST_MANUAL=$(date +%s)
+    event 'Check requested on the page'
+    touch -- "${RUNNING}"
+    scheduled_check "${ref}"
+    rm -f -- "${RUNNING}"
+}
+
 core_job_running() {
     sv /jobs/info | jq -e '[.data.jobs[] | recurse(.child_jobs[]?)
         | select(.done == false and (.name | test("^(home_assistant_core|backup)")))] | length > 0' >/dev/null
@@ -647,6 +675,7 @@ LAST_STATUS=0
 LAST_SEEN=$(date +%s)
 LAST_JOURNAL=0
 
+rm -f -- "${RUNNING}"
 REF=$(prepare_layers) && [[ ! -s "${REF}" ]] && build_ref "${REF}"
 if [[ "${DROP_ON_SCHEDULE}" == true ]]; then
     plan="cache drop at ${DROP_TIMES[*]}"
@@ -669,6 +698,7 @@ while true; do
             LAST_STATUS=0
         fi
     done
+    requested_check && LAST_STATUS=0
 
     crash_code='' crash_at=''
     while read -r ns action code; do

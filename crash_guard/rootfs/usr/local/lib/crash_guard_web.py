@@ -5,9 +5,13 @@ event log of the guard service.
 
 The guard service writes everything this page shows into the app's private
 data: STATUS (the state behind the three problem sensors), the logs and one
-folder per case. The page only reads those files. It changes nothing, accepts
-no POST, and takes nothing from the URL but a case name and a file name, both
-checked against fixed patterns; files are opened without following symlinks.
+folder per case. The page reads those files and takes nothing from the URL but
+a case name and a file name, both checked against fixed patterns; files are
+opened without following symlinks. The one thing it changes: a POST asks for a
+cache check now. The page then leaves REQUEST for the guard service, which
+checks without dropping the cache. At most one request per MANUAL_GAP seconds,
+and only with the X-Crash-Guard header, which a form of another site cannot
+send.
 
 The evidence of a crash (the Home Assistant container log, the fault log, the
 kernel and coredump messages) can hold secrets, as Home Assistant's own log
@@ -16,7 +20,8 @@ Assistant administrators, and loads a log only when it is opened.
 
 It is rendered on the server and needs nothing beyond Python's standard
 library. Its only script takes Home Assistant's theme from the page around
-the ingress frame and loads an evidence file when it is opened.
+the ingress frame, loads an evidence file when it is opened and sends the
+request for a check.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ import signal
 import socketserver
 import stat
 import sys
+import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +49,13 @@ PORT = 8099              # the Supervisor's default ingress port
 INGRESS_PEER = "172.30.32.2"
 DATA = Path("/data/crash_guard")
 STATUS = "status.json"
+# A check requested on this page: REQUEST is left for the guard service, which
+# removes it when it takes the request and keeps RUNNING while it checks;
+# REQUESTED holds the time of the last request
+REQUEST = "check.request"
+RUNNING = "check.running"
+REQUESTED = "check.requested"
+MANUAL_GAP = 600         # seconds between two requested checks
 CASE_NAME = re.compile(r"^[0-9]{8}-[0-9]{6}-[a-z]+$")
 # Files of a case the page shows; nothing else is ever opened from a URL
 EVIDENCE = ("container.log", "home-assistant.log.fault", "kernel.txt", "coredumps.txt")
@@ -86,6 +99,9 @@ TEXT = {
         "events": "Event log", "no_events": "No events yet.", "checks": "Cache checks", "cache_count": "In the cache",
         "fresh_count": "Freshly read", "unknown": "–",
         "days": "d", "hours": "h", "minutes": "min",
+        "check_now": "Check now", "check_queued": "Check requested, starts within a few seconds",
+        "check_running": "Check running", "check_again": "Possible again at {}",
+        "check_failed": "The check could not be requested.",
     },
     "de": {
         "title": "Crash Guard", "settings": "Einstellungen", "refresh": "Aktualisieren", "as_of": "Stand {}",
@@ -119,6 +135,9 @@ TEXT = {
         "events": "Ereignisprotokoll", "no_events": "Noch keine Ereignisse.", "checks": "Cache-Prüfungen",
         "cache_count": "Im Cache", "fresh_count": "Frisch gelesen", "unknown": "–",
         "days": "d", "hours": "h", "minutes": "min",
+        "check_now": "Jetzt prüfen", "check_queued": "Prüfung angefordert, startet in wenigen Sekunden",
+        "check_running": "Prüfung läuft", "check_again": "Wieder möglich um {}",
+        "check_failed": "Die Prüfung konnte nicht angefordert werden.",
     },
 }
 
@@ -180,6 +199,12 @@ main { margin: 0 auto; padding: 16px; max-width: 1040px; }
 .state b { font-weight: 500; }
 .ok { color: var(--success-color); } .bad { color: var(--warning-color); } .muted { color: var(--secondary-text-color); }
 .state .text { color: var(--primary-text-color); }
+.check { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.check .sub { margin: 0; }
+button.text { font: inherit; font-size: 14px; font-weight: 500; color: var(--primary-color); background: none;
+  border: 0; border-radius: 18px; padding: 0 16px; height: 36px; cursor: pointer; }
+button.text:hover { background: color-mix(in srgb, var(--primary-color) 8%, transparent); }
+button.text:disabled { color: var(--disabled-text-color); background: none; cursor: default; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 8px 16px 8px 0; vertical-align: top; }
 td { border-top: 1px solid var(--divider-color); }
@@ -235,6 +260,15 @@ SCRIPT = """(() => {
     const row = e.target.closest("tr[data-href]");
     if (row) location.href = row.dataset.href;
     if (e.target.closest("#refresh")) { e.preventDefault(); location.reload(); }
+    const button = e.target.closest("#check-now");
+    if (button && !button.disabled) {
+      button.disabled = true;
+      // The header keeps forms of other sites out; they cannot send it
+      fetch("", { method: "POST", headers: { "X-Crash-Guard": "check" }, cache: "no-store" })
+        .then((answer) => { if (!answer.ok && answer.status !== 429) throw new Error(answer.status); })
+        .then(() => location.reload())
+        .catch(() => { alert(button.dataset.failed); location.reload(); });
+    }
   });
   // An evidence file is loaded once, when it is opened; as text, never as markup
   document.addEventListener("toggle", async (e) => {
@@ -310,6 +344,73 @@ def load_status(data: Path) -> dict | None:
     except ValueError:
         return None
     return status if isinstance(status, dict) else None
+
+
+# --- A check requested on the page --------------------------------------------------------
+REQUEST_LOCK = threading.Lock()
+
+
+def present(data: Path, name: str) -> bool:
+    try:
+        os.lstat(data / name)
+    except OSError:
+        return False
+    return True
+
+
+def last_request(data: Path) -> float:
+    read = read_text(data, REQUESTED, 64)
+    try:
+        return float(read[0].strip()) if read else 0.0
+    except ValueError:
+        return 0.0
+
+
+def check_state(data: Path, now: float) -> tuple[str, float]:
+    """running, queued, wait (with the time a request is possible again) or ready."""
+    if present(data, RUNNING):
+        return "running", 0.0
+    if present(data, REQUEST):
+        return "queued", 0.0
+    again = last_request(data) + MANUAL_GAP
+    if now < again:
+        return "wait", again
+    return "ready", 0.0
+
+
+def request_check(data: Path, now: float) -> int:
+    """Leaves a request for the guard service: 202, or 429 within MANUAL_GAP
+    of the last request or while one waits or runs."""
+    with REQUEST_LOCK:
+        if check_state(data, now)[0] != "ready":
+            return 429
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        try:
+            os.close(os.open(data / REQUEST, flags, 0o644))
+        except FileExistsError:
+            return 429
+        stamp = data / f"{REQUESTED}.new"
+        try:
+            stamp.unlink(missing_ok=True)
+            fd = os.open(stamp, flags, 0o644)
+            with os.fdopen(fd, "w") as out:
+                out.write(f"{now:.0f}\n")
+            os.replace(stamp, data / REQUESTED)
+        except OSError:
+            LOGGER.warning("Time of the request could not be kept")
+        LOGGER.info("Cache check requested on the page")
+        return 202
+
+
+def check_row(f: Format, data: Path, now: float) -> str:
+    t = f.t
+    state, again = check_state(data, now)
+    note = {"running": t["check_running"], "queued": t["check_queued"],
+            "wait": t["check_again"].format(time.strftime("%H:%M", time.localtime(again)))}.get(state, "")
+    note = f'<span class="sub">{esc(note)}</span>' if note else ""
+    disabled = "" if state == "ready" else " disabled"
+    return (f'<div class="check">{note}<button class="text" id="check-now" type="button"'
+            f' data-failed="{esc(t["check_failed"])}"{disabled}>{esc(t["check_now"])}</button></div>')
 
 
 def parse_time(text: str) -> float | None:
@@ -565,13 +666,14 @@ def log_card(f: Format, data: Path, events: list[str]) -> str:
         f'<tbody>{drops}</tbody></table></div>'), padded=False)
 
 
-def overview(f: Format, data: Path) -> str:
+def overview(f: Format, data: Path, now: float) -> str:
     t = f.t
     status = load_status(data)
     events = lines_of(data, "events.log")
     if status is None:
         return card(t["status"], f'<p class="muted">{esc(t["loading"])}</p>') + log_card(f, data, events)
-    state = card(t["status"], lock_line(f, status) + cache_line(f, status) + crash_line(f, status))
+    state = card(t["status"], lock_line(f, status) + cache_line(f, status) + crash_line(f, status)
+                 + check_row(f, data, now))
     return (f'<div class="cards"><div>{state}{crashes_card(f, status)}</div>'
             f'<div>{lock_card(f, status, data)}</div></div>'
             + cases_card(f, status, data, events) + log_card(f, data, events))
@@ -690,10 +792,10 @@ def render(data: Path, lang: str, slug: str | None, query: dict[str, list[str]],
         body = case_page(f, data, case)
         start = (f'<a class="icon" href="?" title="{esc(t["back"])}">{icon("back")}</a>'
                  f'<h1>{esc(t["title"])} · {esc(t["cases"])}</h1>')
-    else:
-        body = overview(f, data)
-        start = f'<h1>{esc(t["title"])}</h1>'
     now = time.time() if now is None else now
+    if not (case and CASE_NAME.match(case)):
+        body = overview(f, data, now)
+        start = f'<h1>{esc(t["title"])}</h1>'
     actions = f'<span class="stamp opt">{esc(t["as_of"].format(time.strftime("%H:%M:%S", time.localtime(now))))}</span>'
     actions += f'<a class="icon" href="" id="refresh" title="{esc(t["refresh"])}" role="button">{icon("refresh")}</a>'
     # The settings are Home Assistant's own page, outside the ingress frame
@@ -743,11 +845,20 @@ def handler(data: Path, slug: str | None, allowed: set[str]):
                 return
             self._send(200, "text/html; charset=utf-8", render(data, lang, slug, query).encode())
 
+        def do_POST(self) -> None:  # noqa: N802
+            if self._refused():
+                return
+            if self.headers.get("X-Crash-Guard") != "check":
+                self._send(403, "text/plain", b"only from the page")
+                return
+            code = request_check(data, time.time())
+            self._send(code, "text/plain", b"requested" if code == 202 else b"not now")
+
         def _not_allowed(self) -> None:
             if not self._refused():
-                self._send(405, "text/plain", b"read-only", {"Allow": "GET"})
+                self._send(405, "text/plain", b"not allowed", {"Allow": "GET, POST"})
 
-        do_POST = do_PUT = do_DELETE = do_PATCH = _not_allowed
+        do_PUT = do_DELETE = do_PATCH = _not_allowed
 
         def _send(self, code: int, kind: str, body: bytes, extra: dict | None = None) -> None:
             self.send_response(code)

@@ -2,6 +2,12 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-11-05
+
+### Added
+
+- **Check now** on the page: starts a cache check right away, without dropping the cache, for example to clear a finding after its cause is gone. At most once in 10 minutes; the page shows when it is possible again and while the check runs. The page accepts this one POST, only with its own `X-Crash-Guard` header, and the guard service keeps its own 10-minute limit
+
 ## [2.0.2] - 2026-11-05
 
 ### Fixed
