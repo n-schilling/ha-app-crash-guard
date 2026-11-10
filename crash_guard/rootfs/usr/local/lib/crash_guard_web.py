@@ -21,11 +21,16 @@ Assistant administrators, and loads a log only when it is opened.
 It is rendered on the server and needs nothing beyond Python's standard
 library. Its only script takes Home Assistant's theme from the page around
 the ingress frame, loads an evidence file when it is opened and sends the
-request for a check.
+request for a check; the content security policy allows that one script by
+its hash and no other. The app's version, shown at the bottom of every page,
+comes from the image (APP_VERSION, set from the version in
+config.yaml when the image is built).
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import html
 import json
 import logging
@@ -77,11 +82,12 @@ TEXT = {
         "lock_off": "Not in place: {}", "lock_error": "Check failed: {}", "outside": "Defective page outside the lock: {}",
         "no_pages": "No defective pages configured, no memory lock.",
         "cache": "Page cache", "cache_ok": "No corrupted files at the last check", "cache_bad": "{} corrupted file(s) at the last check",
-        "cache_none": "No check yet", "checked": "Last check", "next_checks": "Check times", "drop": "Drop the cache at the check",
+        "cache_none": "No check yet", "cache_failed": "The last check failed", "checked": "Last check", "next_checks": "Check times", "drop": "Drop the cache at the check",
         "crashes": "Crashes", "crashes_ok": "No crash within {}", "crashes_bad": "Home Assistant {}, programs {} within {}",
         "since_boot": "Program crashes since the host booted", "window": "Window",
         "ha_crashes": "Home Assistant", "program_crashes": "Programs on the host", "process": "Process", "signal": "Signal",
         "time": "Time", "message": "Message", "no_crashes": "No crash within the window.",
+        "newest": "The newest {} of {}",
     "boot_slot": "Boot slot", "overlay_slot": "Overlay in the boot slot",
         "overlay_other": "Overlay in the other slot", "config_line": "Line in config.txt", "managed": "Managed by the app",
         "lock_checked": "Checked", "yes": "yes", "no": "no",
@@ -111,11 +117,13 @@ TEXT = {
         "outside": "Defekte Seite außerhalb der Sperre: {}", "no_pages": "Keine defekten Seiten eingetragen, keine Speichersperre.",
         "cache": "Page Cache", "cache_ok": "Keine verfälschten Dateien bei der letzten Prüfung",
         "cache_bad": "{} verfälschte Datei(en) bei der letzten Prüfung", "cache_none": "Noch keine Prüfung",
+        "cache_failed": "Die letzte Prüfung ist fehlgeschlagen",
         "checked": "Letzte Prüfung", "next_checks": "Prüfzeiten", "drop": "Cache bei der Prüfung leeren",
         "crashes": "Abstürze", "crashes_ok": "Kein Absturz in {}", "crashes_bad": "Home Assistant {}, Programme {} in {}",
         "since_boot": "Programmabstürze seit dem Host-Start", "window": "Fenster",
         "ha_crashes": "Home Assistant", "program_crashes": "Programme auf dem Host", "process": "Prozess", "signal": "Signal",
         "time": "Zeit", "message": "Meldung", "no_crashes": "Kein Absturz im Fenster.",
+        "newest": "Die neuesten {} von {}",
 "boot_slot": "Boot-Slot", "overlay_slot": "Overlay im Boot-Slot",
         "overlay_other": "Overlay im anderen Slot", "config_line": "Zeile in config.txt", "managed": "Von der App verwaltet",
         "lock_checked": "Geprüft", "yes": "ja", "no": "nein",
@@ -157,73 +165,37 @@ def icon(name: str, cls: str = "") -> str:
     return f'<svg class="{cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="{ICONS[name]}"/></svg>'
 
 
-# Home Assistant's defaults; the script replaces them with the theme in use
+# Home Assistant's look, shared by the ingress pages of all these apps: read
+# once at the start and put into the page (one file, no route of its own).
+# Its defaults are Home Assistant's; the script replaces them with the theme
+# in use.
+SHARED_STYLE_FILE = Path(__file__).resolve().parent.parent / "share/ha-app/ha.css"
+
+
+def shared_style() -> str:
+    try:
+        return SHARED_STYLE_FILE.read_text(encoding="utf-8")
+    except OSError:
+        LOGGER.warning("Stylesheet %s missing", SHARED_STYLE_FILE)
+        return ""
+
+
+SHARED_STYLE = shared_style()
+
+# What only this page needs, after the shared stylesheet
 STYLE = """
-:root { color-scheme: light dark; --primary-background-color: #fafafa; --secondary-background-color: #e5e5e5;
-  --card-background-color: #fff; --primary-text-color: #212121; --secondary-text-color: #727272;
-  --divider-color: rgba(0,0,0,.12); --primary-color: #03a9f4; --success-color: #4caf50;
-  --warning-color: #ff9800; --error-color: #db4437; --disabled-text-color: #bdbdbd;
-  --sidebar-background-color: #fff; --sidebar-text-color: #212121; --sidebar-icon-color: rgba(0,0,0,.5);
-  --app-header-border-bottom: 1px solid var(--divider-color); --ha-card-border-radius: 12px;
-  --ha-card-border-width: 1px; --ha-card-border-color: var(--divider-color); --ha-card-box-shadow: none;
-  --ha-font-family-body: Roboto, Noto, sans-serif; --header-height: 56px; }
-@media (prefers-color-scheme: dark) { :root { --primary-background-color: #111; --secondary-background-color: #282828;
-  --card-background-color: #1c1c1c; --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b;
-  --divider-color: rgba(225,225,225,.12); --disabled-text-color: #6f6f6f; --sidebar-background-color: #1c1c1c;
-  --sidebar-text-color: #e1e1e1; --sidebar-icon-color: rgba(255,255,255,.5); } }
-* { box-sizing: border-box; }
-html, body { margin: 0; background: var(--primary-background-color); color: var(--primary-text-color);
-  font: 14px/1.6 var(--ha-font-family-body); -webkit-font-smoothing: antialiased; }
-a { color: var(--primary-color); text-decoration: none; }
-svg { width: 24px; height: 24px; fill: currentColor; flex: none; }
-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; height: var(--header-height);
-  padding: 0 12px; background: var(--sidebar-background-color); color: var(--sidebar-text-color);
-  border-bottom: var(--app-header-border-bottom); }
-header h1 { margin: 0 0 0 12px; font-size: 20px; font-weight: 400; line-height: 32px; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
-header .actions { margin-left: auto; display: flex; align-items: center; }
-header .stamp { margin-right: 8px; font-size: 12px; color: var(--secondary-text-color); white-space: nowrap; }
-header a.icon { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px;
-  border-radius: 50%; color: var(--sidebar-icon-color); }
-header a.icon:hover, tbody tr.link:hover { background: color-mix(in srgb, var(--primary-text-color) 6%, transparent); }
-main { margin: 0 auto; padding: 16px; max-width: 1040px; }
-.card { background: var(--card-background-color); border-radius: var(--ha-card-border-radius);
-  border: var(--ha-card-border-width) solid var(--ha-card-border-color); box-shadow: var(--ha-card-box-shadow);
-  margin-bottom: 16px; overflow: hidden; }
-.card h2 { margin: 0; padding: 24px 16px 16px; font-size: 24px; font-weight: 400; line-height: 32px; }
-.card h3 { margin: 0; padding: 8px 16px; font-size: 14px; font-weight: 500; color: var(--secondary-text-color); }
-.card .content { padding: 0 16px 16px; }
+header > .icon-button:first-child { margin-left: -12px; }
+header > .icon-button + h1 { margin-left: 12px; }
+.card h3 { margin: 0; padding: 8px 16px; font-size: var(--ha-font-size-m); font-weight: var(--ha-font-weight-medium);
+  color: var(--secondary-text-color); }
 .card .content > p { margin: 0; }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 0 16px; }
-.state { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
-.state b { font-weight: 500; }
-.ok { color: var(--success-color); } .bad { color: var(--warning-color); } .muted { color: var(--secondary-text-color); }
+.state { align-items: flex-start; font-weight: var(--ha-font-weight-normal); }
+.state b { font-weight: var(--ha-font-weight-medium); }
 .state .text { color: var(--primary-text-color); }
-.check { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
-.check .sub { margin: 0; }
-button.text { font: inherit; font-size: 14px; font-weight: 500; color: var(--primary-color); background: none;
-  border: 0; border-radius: 18px; padding: 0 16px; height: 36px; cursor: pointer; }
-button.text:hover { background: color-mix(in srgb, var(--primary-color) 8%, transparent); }
-button.text:disabled { color: var(--disabled-text-color); background: none; cursor: default; }
-table { border-collapse: collapse; width: 100%; }
-th, td { text-align: left; padding: 8px 16px 8px 0; vertical-align: top; }
-td { border-top: 1px solid var(--divider-color); }
-th { font-weight: 500; font-size: 12px; white-space: nowrap; }
-table.kv th { width: 45%; font-size: 14px; font-weight: 400; color: var(--secondary-text-color);
-  border-top: 1px solid var(--divider-color); white-space: normal; }
-table.kv tr:first-child th, table.kv tr:first-child td { border-top: 0; }
-.list th:first-child, .list td:first-child { padding-left: 16px; }
-.list th { height: 48px; vertical-align: middle; border-bottom: 1px solid var(--divider-color); }
-.list td { vertical-align: middle; font-size: 13px; }
-.list tr:first-child td { border-top: 0; }
+.card-actions .sub { margin-right: auto; }
 .list tr.link { cursor: pointer; }
 .list td.go { width: 40px; color: var(--secondary-text-color); }
-.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.nowrap { white-space: nowrap; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
-.sub { display: block; font-size: 12px; line-height: 16px; color: var(--secondary-text-color); }
-.scroll { overflow-x: auto; }
-.note { padding: 0 16px 16px; font-size: 12px; color: var(--secondary-text-color); }
 details { border-top: 1px solid var(--divider-color); }
 details summary { display: flex; align-items: center; gap: 8px; padding: 12px 16px; cursor: pointer; list-style: none; }
 details summary::-webkit-details-marker { display: none; }
@@ -231,17 +203,16 @@ details summary svg { width: 20px; height: 20px; color: var(--secondary-text-col
 details[open] summary svg { transform: rotate(90deg); }
 details pre { margin: 0; padding: 8px 16px 16px; max-height: 480px; overflow: auto; white-space: pre-wrap;
   word-break: break-all; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-@media (max-width: 600px) { .opt { display: none; } }
 """
 
 # Takes Home Assistant's theme from the page around the ingress frame (same
 # origin) and follows it; loads an evidence file when it is opened
 THEME_VARS = ("primary-background-color", "secondary-background-color", "card-background-color",
-              "primary-text-color", "secondary-text-color", "divider-color", "primary-color", "success-color",
-              "warning-color", "error-color", "disabled-text-color", "sidebar-background-color",
-              "sidebar-text-color", "sidebar-icon-color", "app-header-border-bottom", "ha-card-border-radius",
-              "ha-card-border-width", "ha-card-border-color", "ha-card-box-shadow", "ha-font-family-body",
-              "header-height")
+              "primary-text-color", "secondary-text-color", "disabled-text-color", "divider-color",
+              "primary-color", "text-primary-color", "success-color", "warning-color", "error-color",
+              "info-color", "sidebar-background-color", "sidebar-text-color", "sidebar-icon-color",
+              "app-header-border-bottom", "ha-card-border-radius", "ha-card-border-width",
+              "ha-card-border-color", "ha-card-box-shadow", "ha-font-family-body", "header-height")
 SCRIPT = """(() => {
   try {
     const outer = window.parent.document.documentElement;
@@ -287,9 +258,13 @@ SCRIPT = """(() => {
   }, true);
 })();""".replace("NAMES", json.dumps(THEME_VARS))
 
+# The one script of the page, allowed by its hash: should some text ever slip
+# through unescaped, a script in it would still not run
+SCRIPT_HASH = "sha256-" + base64.b64encode(hashlib.sha256(SCRIPT.encode()).digest()).decode()
+
 # Nothing but this page and its own requests; no frame of another site
 SECURITY_HEADERS = {
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+    "Content-Security-Policy": f"default-src 'none'; style-src 'unsafe-inline'; script-src '{SCRIPT_HASH}'; "
                                "connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -409,7 +384,7 @@ def check_row(f: Format, data: Path, now: float) -> str:
             "wait": t["check_again"].format(time.strftime("%H:%M", time.localtime(again)))}.get(state, "")
     note = f'<span class="sub">{esc(note)}</span>' if note else ""
     disabled = "" if state == "ready" else " disabled"
-    return (f'<div class="check">{note}<button class="text" id="check-now" type="button"'
+    return (f'<div class="card-actions">{note}<button class="button" id="check-now" type="button"'
             f' data-failed="{esc(t["check_failed"])}"{disabled}>{esc(t["check_now"])}</button></div>')
 
 
@@ -521,10 +496,10 @@ def kv(rows: list[tuple[str, str]]) -> str:
     return '<table class="kv">' + "".join(f"<tr><th>{esc(k)}</th><td>{v}</td></tr>" for k, v in rows) + "</table>"
 
 
-def card(title: str | None, content: str, padded: bool = True) -> str:
+def card(title: str | None, content: str, padded: bool = True, actions: str = "") -> str:
     head = f"<h2>{esc(title)}</h2>" if title else ""
     inner = f'<div class="content">{content}</div>' if padded else content
-    return f'<div class="card">{head}{inner}</div>'
+    return f'<div class="card">{head}{inner}{actions}</div>'
 
 
 def line(kind: str, title: str, text: str, sub: str = "") -> str:
@@ -563,9 +538,11 @@ def lock_line(f: Format, status: dict) -> str:
 def cache_line(f: Format, status: dict) -> str:
     t, check = f.t, status.get("check") or {}
     n = check.get("corrupted")
-    if n is None:
-        return line("off", t["cache"], t["cache_none"])
     when = f'{esc(t["checked"])} {esc(f.stamp(check.get("when") or ""))}'
+    if n is None:
+        if check.get("when"):
+            return line("bad", t["cache"], t["cache_failed"], when)
+        return line("off", t["cache"], t["cache_none"])
     if n == 0:
         return line("ok", t["cache"], t["cache_ok"], when)
     return line("bad", t["cache"], t["cache_bad"].format(n), when)
@@ -574,7 +551,8 @@ def cache_line(f: Format, status: dict) -> str:
 def crash_line(f: Format, status: dict) -> str:
     t, c = f.t, status.get("crashes") or {}
     window = f.hours(int(c.get("window_hours") or 24))
-    ha, programs = len(c.get("home_assistant") or []), len(c.get("programs") or [])
+    ha = len(c.get("home_assistant") or [])
+    programs = c.get("programs_count", len(c.get("programs") or []))
     sub = esc(f"{t['since_boot']}: {c.get('boot', t['unknown'])}")
     if ha or programs:
         return line("bad", t["crashes"], t["crashes_bad"].format(ha, programs, window), sub)
@@ -627,6 +605,9 @@ def crashes_card(f: Format, status: dict) -> str:
             + (f'<div class="scroll"><table class="list"><thead><tr><th>{esc(t["time"])}</th>'
                f'<th>{esc(t["process"])}</th><th>{esc(t["signal"])}</th></tr></thead><tbody>{programs}</tbody></table></div>'
                if programs else f'<div class="content">{none}</div>'))
+    shown, total = len(c.get("programs") or []), c.get("programs_count", 0)
+    if total > shown:
+        body += f'<div class="note">{esc(t["newest"].format(shown, total))}</div>'
     window = f.hours(int(c.get("window_hours") or 24))
     return card(f'{t["crashes"]} · {window}', body, padded=False)
 
@@ -672,8 +653,8 @@ def overview(f: Format, data: Path, now: float) -> str:
     events = lines_of(data, "events.log")
     if status is None:
         return card(t["status"], f'<p class="muted">{esc(t["loading"])}</p>') + log_card(f, data, events)
-    state = card(t["status"], lock_line(f, status) + cache_line(f, status) + crash_line(f, status)
-                 + check_row(f, data, now))
+    state = card(t["status"], lock_line(f, status) + cache_line(f, status) + crash_line(f, status),
+                 actions=check_row(f, data, now))
     return (f'<div class="cards"><div>{state}{crashes_card(f, status)}</div>'
             f'<div>{lock_card(f, status, data)}</div></div>'
             + cases_card(f, status, data, events) + log_card(f, data, events))
@@ -784,27 +765,36 @@ def evidence_text(data: Path, case: str, file: str, lang: str) -> str | None:
     return text
 
 
-def render(data: Path, lang: str, slug: str | None, query: dict[str, list[str]], now: float | None = None) -> str:
+def version_line(version: str | None) -> str:
+    """The app's name and version at the bottom of every page."""
+    text = f"Crash Guard {version}" if version else "Crash Guard"
+    return f'<footer class="version">{esc(text)}</footer>'
+
+
+def render(data: Path, lang: str, slug: str | None, query: dict[str, list[str]], now: float | None = None,
+           version: str | None = None) -> str:
     f = Format(lang)
     t = f.t
     case = (query.get("case") or [""])[0]
     if case and CASE_NAME.match(case):
         body = case_page(f, data, case)
-        start = (f'<a class="icon" href="?" title="{esc(t["back"])}">{icon("back")}</a>'
+        start = (f'<a class="icon-button" href="?" title="{esc(t["back"])}">{icon("back")}</a>'
                  f'<h1>{esc(t["title"])} · {esc(t["cases"])}</h1>')
     now = time.time() if now is None else now
     if not (case and CASE_NAME.match(case)):
         body = overview(f, data, now)
         start = f'<h1>{esc(t["title"])}</h1>'
     actions = f'<span class="stamp opt">{esc(t["as_of"].format(time.strftime("%H:%M:%S", time.localtime(now))))}</span>'
-    actions += f'<a class="icon" href="" id="refresh" title="{esc(t["refresh"])}" role="button">{icon("refresh")}</a>'
+    actions += f'<a class="icon-button" href="" id="refresh" title="{esc(t["refresh"])}" role="button">{icon("refresh")}</a>'
     # The settings are Home Assistant's own page, outside the ingress frame
-    actions += (f'<a class="icon" href="/config/app/{esc(slug)}/config" target="_top" title="{esc(t["settings"])}">'
+    actions += (f'<a class="icon-button" href="/config/app/{esc(slug)}/config" target="_top" title="{esc(t["settings"])}">'
                 f'{icon("settings")}</a>' if slug else "")
     return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f"<title>{esc(t['title'])}</title><style>{STYLE}</style><script>{SCRIPT}</script></head><body>"
-            f'<header>{start}<div class="actions">{actions}</div></header><main>{body}</main></body></html>')
+            f"<title>{esc(t['title'])}</title><style>{SHARED_STYLE}</style><style>{STYLE}</style>"
+            f"<script>{SCRIPT}</script></head><body>"
+            f'<header>{start}<div class="actions">{actions}</div></header><main>{body}</main>{version_line(version)}'
+            '</body></html>')
 
 
 # --- The server ------------------------------------------------------------------------------
@@ -817,7 +807,7 @@ class Server(ThreadingHTTPServer):
         self.server_name, self.server_port = "crash-guard-web", self.server_address[1]
 
 
-def handler(data: Path, slug: str | None, allowed: set[str]):
+def handler(data: Path, slug: str | None, allowed: set[str], version: str | None = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "crash-guard-web"
 
@@ -843,7 +833,7 @@ def handler(data: Path, slug: str | None, allowed: set[str]):
                 else:
                     self._send(200, "text/plain; charset=utf-8", text.encode())
                 return
-            self._send(200, "text/html; charset=utf-8", render(data, lang, slug, query).encode())
+            self._send(200, "text/html; charset=utf-8", render(data, lang, slug, query, version=version).encode())
 
         def do_POST(self) -> None:  # noqa: N802
             if self._refused():
@@ -881,7 +871,8 @@ def main() -> None:
     # The app's slug, e.g. 4a183770_crash_guard; the Supervisor names the container's host after it
     slug = os.environ.get("HOSTNAME", "").replace("-", "_") or None
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    server = Server(("0.0.0.0", PORT), handler(DATA, slug, {INGRESS_PEER}))
+    version = os.environ.get("APP_VERSION") or None
+    server = Server(("0.0.0.0", PORT), handler(DATA, slug, {INGRESS_PEER}, version))
     LOGGER.info("Web page on port %d (ingress)", PORT)
     server.serve_forever()
 

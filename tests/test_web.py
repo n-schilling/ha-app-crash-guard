@@ -67,12 +67,12 @@ class Fixture(unittest.TestCase):
         self.tmp.cleanup()
 
     def page(self, query: str = "", lang: str = "en") -> str:
-        return w.render(self.data, lang, "4a183770_crash_guard", w.parse_qs(query), now=NOW)
+        return w.render(self.data, lang, "4a183770_crash_guard", w.parse_qs(query), now=NOW, version="9.8.7")
 
 
 class Overview(Fixture):
     def test_check_button(self) -> None:
-        self.assertRegex(self.page(), r'<button class="text" id="check-now"[^>]*>Check now</button>')
+        self.assertRegex(self.page(), r'<button class="button" id="check-now"[^>]*>Check now</button>')
         self.assertNotRegex(self.page(), r'id="check-now"[^>]* disabled')
         (self.data / w.REQUESTED).write_text(f"{NOW - 60:.0f}\n")
         page = self.page(lang="de")
@@ -105,6 +105,33 @@ class Overview(Fixture):
         page = self.page()
         self.assertIn("No crash within 24 h", page)
         self.assertNotIn("Programs on the host", page)
+
+    def test_version_at_the_bottom(self) -> None:
+        for page in (self.page(), self.page(f"case={CRASH}"), self.page(lang="de")):
+            self.assertTrue(page.endswith('</main><footer class="version">Crash Guard 9.8.7</footer></body></html>'))
+        page = w.render(self.data, "en", None, {}, now=NOW)
+        self.assertIn('<footer class="version">Crash Guard</footer>', page)
+
+    def test_failed_check(self) -> None:
+        (self.data / "status.json").write_text(
+            json.dumps({**STATUS, "check": {"corrupted": None, "when": "2026-10-02T04:30:52+02:00"}}))
+        self.assertIn("The last check failed", self.page())
+        (self.data / "status.json").write_text(json.dumps({**STATUS, "check": {"corrupted": None, "when": None}}))
+        self.assertIn("No check yet", self.page())
+
+    def test_more_program_crashes_than_listed(self) -> None:
+        (self.data / "status.json").write_text(
+            json.dumps({**STATUS, "crashes": {**STATUS["crashes"], "programs_count": 300}}))
+        page = self.page()
+        self.assertIn("Home Assistant 0, programs 300 within 24 h", page)
+        self.assertIn("The newest 1 of 300", page)
+
+    def test_shared_stylesheet(self) -> None:
+        page = self.page()
+        self.assertTrue(w.SHARED_STYLE.startswith("/* ha.css"))
+        self.assertIn(f"<style>{w.SHARED_STYLE}</style>", page)
+        self.assertIn('class="icon-button"', page)
+        self.assertIn('<div class="card-actions">', page)
 
     def test_without_status(self) -> None:
         (self.data / "status.json").unlink()
@@ -182,7 +209,7 @@ class Case(Fixture):
 class Server(Fixture):
     def setUp(self) -> None:
         super().setUp()
-        self.server = w.Server(("127.0.0.1", 0), w.handler(self.data, "slug", {"127.0.0.1"}))
+        self.server = w.Server(("127.0.0.1", 0), w.handler(self.data, "slug", {"127.0.0.1"}, "1.2.3"))
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_port}"
 
@@ -195,8 +222,16 @@ class Server(Fixture):
         code, headers, body = self.get("/")
         self.assertEqual(code, 200)
         self.assertIn("frame-ancestors 'self'", headers["Content-Security-Policy"])
+        self.assertIn("Crash Guard 1.2.3</footer>", body)
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
-        self.assertIn("Crash Guard", body)
+
+    def test_only_the_own_script_runs(self) -> None:
+        csp = self.get("/")[1]["Content-Security-Policy"]
+        self.assertNotIn("script-src 'unsafe-inline'", csp)
+        script = w.SCRIPT.encode()
+        digest = w.base64.b64encode(w.hashlib.sha256(script).digest()).decode()
+        self.assertIn(f"script-src 'sha256-{digest}'", csp)
+        self.assertIn(f"<script>{w.SCRIPT}</script>", self.get("/")[2])
 
     def test_evidence_as_plain_text(self) -> None:
         code, headers, body = self.get(f"/?case={CRASH}&file=container.log")
