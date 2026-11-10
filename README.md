@@ -8,7 +8,7 @@
 A Home Assistant app for everything about crashes on a Home Assistant OS host: it counts crashes of every host program, catches crashes of Home Assistant itself, saves evidence and brings it back up, checks the page cache for corrupted files (the typical trace of defective RAM) and, on a Raspberry Pi, locks defective RAM pages away from Linux through the device tree, so the host keeps running until the board is replaced. Everything it finds is on its own page in Home Assistant; three problem sensors tell automations when something is wrong. Requires Home Assistant 2026.11 or later.
 
 > [!WARNING]
-> Crash Guard needs the Docker API, privileged helper containers, the Supervisor API as manager, the host journal and, for the RAM lock, write access to the boot configuration. Together that is full control over the host. Read [what the app may do](crash_guard/DOCS.md#what-the-app-may-do) before installing it.
+> Crash Guard needs the Docker API, privileged helper containers, the Supervisor API (to start Home Assistant), the host journal and, for the RAM lock, write access to the boot configuration. Together that is full control over the host. Read [what the app may do](crash_guard/DOCS.md#what-the-app-may-do) before installing it.
 
 ## Screenshots
 
@@ -78,6 +78,18 @@ The guard service watches the Home Assistant container and the host journal, che
 2. Install **Crash Guard**, turn off its **Protection mode**, review the options and start it. Crash Guard needs the Docker API, which protection mode withholds; with it on, the app stops with a message saying so.
 
 See [the documentation](crash_guard/DOCS.md) for the options, the page, the sensors and troubleshooting. Changes are listed in the [changelog](crash_guard/CHANGELOG.md).
+
+## Development
+
+The guard service is Bash in [`crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run`](crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run) with its libraries in [`crash_guard/rootfs/usr/local/lib/crash-guard`](crash_guard/rootfs/usr/local/lib/crash-guard); the helpers and the page are Python in [`crash_guard/rootfs/usr/local/bin`](crash_guard/rootfs/usr/local/bin). The page's look comes from the stylesheet shared by these apps, [`ha.css`](crash_guard/rootfs/usr/local/share/ha-app/ha.css), which stays identical in every app.
+
+```bash
+scripts/check.sh
+```
+
+`scripts/check.sh` runs what CI runs (changelog, shellcheck, ruff, the image built for this machine with the app, guard and page tests inside it, and the test against a real Mosquitto broker; `--no-docker` skips what needs Docker). The screenshots come from `scripts/screenshots.py` (see its header for the setup): it renders the page from made-up data and draws it with headless Chromium.
+
+Releases: work on `dev`, raise `version` in `crash_guard/config.yaml` and add its section to the changelog; when CI is green on `main`, the release workflow tags the version and publishes the release with that section.
 
 ## Support
 

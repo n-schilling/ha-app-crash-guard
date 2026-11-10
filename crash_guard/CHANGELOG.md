@@ -9,6 +9,7 @@ All notable changes to this app are documented here. The format follows [Keep a 
 - The page shows the app's name and version at the bottom
 - Documentation for Home Assistant 2026.11, with diagrams of the crash handling and the cache check, and screenshots made from made-up data by `scripts/screenshots.py`
 - `scripts/check.sh` runs the checks of the CI locally
+- A Development section in the README: checks, screenshots and the release steps
 
 ### Changed
 
@@ -16,6 +17,7 @@ All notable changes to this app are documented here. The format follows [Keep a 
 - Requires Home Assistant 2026.11 or later
 - Built on `home-assistant/base-debian:trixie-2026.11.0`, pinned by digest; Dependabot proposes updates of the base image
 - The device in Home Assistant links to the app under **Settings → Apps**
+- The app asks the Supervisor for the role `homeassistant` instead of `manager`: it can still start Home Assistant and see running jobs, but no longer manage other apps, backups or the host. The new role takes effect when the app is updated
 - The Supervisor token and the MQTT password are no longer on any command line, where other processes could read them; they are in files only root can read
 - The page allows only its own script (content security policy by hash)
 - A check copies at most 20 corrupted files, each up to 10 MB, and only while more than 1 GB is free; of `home-assistant.log.fault` only the last MB, and only a file with a single name

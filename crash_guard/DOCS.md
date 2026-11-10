@@ -58,7 +58,7 @@ Crash Guard needs far more rights than a usual app. Each one serves a feature ab
 |---|---|---|
 | Docker API (`docker_api`, protection mode off) | Everything Docker can do on the host, which is as much as root | Watching the Home Assistant container for crashes, reading the files of its image, starting short-lived helper containers |
 | Privileged helper containers | Root on the host for the helper's single command | Dropping the page cache, reading the physical addresses of corrupted pages, reading and writing the boot partition for the RAM lock |
-| Supervisor API as manager (`hassio_role: manager`) | Managing Home Assistant Core, other apps, backups and the host | Starting Home Assistant after a crash, waiting for running updates and backups, reading its own image |
+| Supervisor API, role `homeassistant` (`hassio_role: homeassistant`) | Starting, stopping and updating Home Assistant Core, reading the `info` of the Supervisor and its parts; not managing other apps, backups or the host | Starting Home Assistant after a crash, waiting for running updates and backups (`/jobs/info`), reading its own image |
 | Home Assistant API (`homeassistant_api`) | Calling any action and setting any state in Home Assistant | Notifications through `notify_service`, the entities when no MQTT broker is available |
 | Ingress | A page in Home Assistant, reachable by administrators | Showing what the app found; the only thing the page can start is a cache check without dropping the cache |
 | Host journal (`journald`) | Reading all system logs of the host | Counting program crashes, saving kernel and coredump messages as evidence |
