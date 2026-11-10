@@ -1,8 +1,9 @@
 name: Crash Guard
-version: "2.1.0"
+version: "2.2.0"
 slug: crash_guard
 description: Catches and counts crashes - of Home Assistant and of every host program - checks the page cache for corrupted files and locks defective RAM blocks, with a web page of its findings
 url: https://github.com/n-schilling/ha-app-crash-guard
+homeassistant: 2026.11.0
 arch:
   - aarch64
   - amd64
