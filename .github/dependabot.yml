@@ -7,3 +7,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /crash_guard
+    schedule:
+      interval: weekly

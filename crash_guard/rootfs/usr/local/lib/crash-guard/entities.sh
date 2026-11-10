@@ -27,6 +27,40 @@ cg_clear() { mosquitto_pub "${MQ[@]}" -r -q 1 -t "$1" -n; }
 # shellcheck source=../mqtt-device.sh
 source /usr/local/lib/mqtt-device.sh
 
+# The broker's user name and password go into the options files that
+# mosquitto_pub and mosquitto_sub read from XDG_CONFIG_HOME, never on their
+# command line. One option per line, the value is the rest of the line.
+# $1 = folder only root can read, $2 = user name, $3 = password
+cg_credentials() {
+    local client
+    for client in mosquitto_pub mosquitto_sub; do
+        (umask 077 && printf -- '-u %s\n-P %s\n' "$2" "$3" > "$1/${client}")
+    done
+    export XDG_CONFIG_HOME=$1
+}
+
+# A connection held open with a last will marks the entities unavailable if
+# the app dies; a regular stop publishes "offline" itself. When the
+# connection drops (broker restart, keepalive timeout), the broker sends the
+# last will; after every new connection the holder says "online" again, so
+# the entities do not stay unavailable until the next hourly status.
+cg_hold_availability() {
+    local sub=''
+    trap '[[ -n "${sub}" ]] && kill "${sub}" 2> /dev/null; exit 0' TERM
+    while true; do
+        mosquitto_sub "${MQ[@]}" -i "${HOSTNAME}-availability" -q 1 -t "${CG_AVAIL}" \
+            --will-topic "${CG_AVAIL}" --will-payload offline --will-retain --will-qos 1 \
+            > /dev/null 2>&1 &
+        sub=$!
+        sleep "${CG_HOLD_SETTLE:-2}" & wait $!
+        if kill -0 "${sub}" 2> /dev/null; then
+            printf 'online' | cg_pub "${CG_AVAIL}" 2> /dev/null
+        fi
+        wait "${sub}"
+        sleep "${CG_HOLD_RETRY:-10}" & wait $!
+    done
+}
+
 # One entity of the device message; $1 = entity ID suffix
 cg_component() {
     local component name uid extra
@@ -48,7 +82,7 @@ cg_announce() {
         components=$(jq -c --arg k "${suffix}" --argjson c "$(cg_component "${suffix}")" '.[$k] = $c' <<< "${components}")
     done
     md_announce crash_guard "$(jq -nc --argjson c "${components}" --arg avail "${CG_AVAIL}" \
-        --arg dev "${NAME_PREFIX}" --arg cfg "homeassistant://hassio/addon/${SLUG}/info" \
+        --arg dev "${NAME_PREFIX}" --arg cfg "homeassistant://config/app/${SLUG}/info" \
         --arg version "${APP_VERSION:-unknown}" --arg url "${CG_SUPPORT_URL}" '
         {device:{identifiers:["crash_guard"], name:$dev, manufacturer:"Crash Guard",
                  model:"Crash Guard", configuration_url:$cfg},
@@ -86,8 +120,16 @@ crash_json() {
                + {time: (.__REALTIME_TIMESTAMP | tonumber / 1e6 | floor | todate)}'
 }
 
+# The cursor of the newest coredump entry, to tell whether there is a new
+# one without reading the whole journal; empty without any
+crash_cursor() {
+    journalctl -D "${CG_JOURNAL:-/var/log/journal}" -t systemd-coredump -n 1 -o json 2>/dev/null \
+        | jq -r '.__CURSOR // empty' 2>/dev/null | tail -1
+}
+
 # The crashes for the Crashes sensor and the web page, as one JSON object:
-# program crashes since boot (count) and within the window (the newest 50),
+# program crashes since boot (count) and within the window (their count and
+# the newest 50),
 # and the Home Assistant crashes the guard caught within the window, from its
 # events.log. $1 = window in hours, $2 = events.log
 crash_status() {
@@ -98,6 +140,7 @@ crash_status() {
     ha=$(awk -v c="${cutoff}" '$1 > c && /Crash handled|NOT handled/' "$2" 2>/dev/null \
         | jq -Rsc 'split("\n") | map(select(. != "") | capture("^(?<time>\\S+) (?<message>.*)$")) | reverse')
     jq -nc --argjson h "$1" --argjson boot "${boot}" --argjson recent "${recent}" --argjson ha "${ha:-[]}" '
-        {window_hours:$h, boot:$boot, programs:($recent | .[-50:] | reverse), home_assistant:$ha,
+        {window_hours:$h, boot:$boot, programs_count:($recent | length),
+         programs:($recent | .[-50:] | reverse), home_assistant:$ha,
          problem:(($recent | length) + ($ha | length) > 0)}'
 }

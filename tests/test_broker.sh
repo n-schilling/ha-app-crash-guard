@@ -1,7 +1,7 @@
 #!/bin/bash
 # Tests Crash Guard's entities against a real Mosquitto broker: device
 # discovery, the hand-over of the single entity topics of 1.2.0, removing an
-# entity, and the states. Run inside the built image, next to a broker
+# entity, the states, and the credentials from the options files. Run inside the built image, next to a broker
 # reachable as "broker" (see the CI workflow):
 #   docker run --rm --network <net> -v "$PWD/tests:/tests:ro" <image> bash /tests/test_broker.sh
 set -u
@@ -67,6 +67,22 @@ expect 'unknown state as None' "$(retained crash_guard/corrupted_cache)" None
 entities 'cg_publish crashes "{\"state\":\"on\"}"'
 expect 'problem on' "$(retained crash_guard/crashes)" on
 expect 'no attributes topic' "$(retained crash_guard/crashes/attributes)" ''
+
+echo '# Credentials from the options files, never on the command line'
+CREDS=$(mktemp -d)
+chmod 700 "${CREDS}"
+login() {
+    bash -c '
+        source /usr/local/lib/crash-guard/entities.sh
+        [[ -n "$2" ]] && cg_credentials "$1" crash-guard "$2"
+        declare -a MQ=(-h broker -p 1884)
+        printf "%s" "$3" | cg_pub crash_guard/login_test 2> /dev/null && echo published || echo refused
+        md_retained crash_guard/login_test 2 | cut -f2' _ "${CREDS}" "$1" "$2" 2>> "${WORK}/log"
+}
+expect 'user name and password with spaces are taken' "$(login 'pass with spaces' one | tr '\n' ' ')" 'published one '
+rm -f "${CREDS}"/mosquitto_*
+expect 'without them the broker refuses' "$(login '' two | head -1)" refused
+expect 'a wrong password is refused' "$(login wrong three | head -1)" refused
 
 if (( FAILED )); then
     echo '--- log:'

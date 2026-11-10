@@ -2,8 +2,8 @@
 # Tests the guard service itself against a fake host (tests/fake_host.py):
 # the start, the protection mode check, the status entities, a crash of Home
 # Assistant with evidence kept as a case, cache drop, restart and
-# notification, the restart limit, an intended stop and a check requested on
-# the page. Run inside the built image, as root:
+# notification, the restart limit, an intended stop, a check requested on
+# the page and a check whose helper fails. Run inside the built image, as root:
 #   docker run --rm --add-host supervisor:127.0.0.1 -v "$PWD/tests:/tests:ro" \
 #     --entrypoint bash <image> /tests/test_guard.sh
 # journalctl is a stub; there is no MQTT broker, so the entities are states
@@ -28,9 +28,11 @@ expect() {
 wait_for() { local i; for ((i = 0; i < $2 * 5; i++)); do eval "$1" && return 0; sleep 0.2; done; return 1; }
 requests() { jq -c "select($1)" "${FAKE}/requests.jsonl"; }
 count() { requests "$1" | wc -l | tr -d ' '; }
+# The ID of the Home Assistant container in tests/fake_host.py
+readonly HA_ID=0123456789ab0123456789ab0123456789ab0123456789ab0123456789abcdef
 event() {
-    jq -nc --arg a "$1" --arg c "$2" --argjson t "$(date +%s%N)" \
-        '{Action:$a, timeNano:$t, Actor:{Attributes:{name:"homeassistant", exitCode:$c}}}' >> "${FAKE}/events.jsonl"
+    jq -nc --arg a "$1" --arg c "$2" --arg id "${3:-${HA_ID}}" --argjson t "$(date +%s%N)" \
+        '{Action:$a, timeNano:$t, Actor:{ID:$id, Attributes:{name:"homeassistant", exitCode:$c}}}' >> "${FAKE}/events.jsonl"
 }
 events_log() { cat /data/crash_guard/events.log 2>/dev/null; }
 
@@ -88,8 +90,13 @@ drop='.path == "/containers/create" and (.body.Cmd | join(" ") | test("drop_cach
 expect 'helpers run the image of the app itself' \
     "$(requests '.path == "/containers/create"' | jq -r '.body.Image' | sort -u)" \
     sha256:feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface
-expect 'cache dropped by a privileged helper without network' \
-    "$(requests "${drop}" | head -1 | jq -c '.body.HostConfig | [.Privileged, .NetworkMode, .ReadonlyRootfs]')" '[true,"none",true]'
+expect 'reference read from the cache and straight from the drive' \
+    "$(requests '.path == "/containers/create" and .body.Entrypoint[0] == "/usr/local/bin/cg-hash.sh"' | jq -r '.body.Cmd[0]' | tr '\n' ' ')" \
+    '/data/crash_guard/layers.txt --direct '
+expect 'the cache is not dropped for the reference' "$(requests "${drop}" | wc -l | tr -d ' ')" 0
+expect 'no secret on a command line' \
+    "$(requests '.path == "/containers/create"' | jq -r '.body.Cmd | join(" ")' | grep -c test-token)" 0
+expect 'the Supervisor token is in a file only root can read' "$(stat -c '%a %U' /run/crash-guard/supervisor.header)" '600 root'
 wait_for '[[ $(count ".path == \"/core/api/states/binary_sensor.test_crashes\"") -gt 0 &&
            $(count ".path == \"/core/api/states/binary_sensor.test_corrupted_cache\"") -gt 0 &&
            $(count ".path == \"/core/api/states/binary_sensor.test_memory_lock_problem\"") -gt 0 ]]' 30
@@ -115,7 +122,10 @@ event die 139
 wait_for 'events_log | grep -q "Crash handled"' 30
 expect 'crash handled' "$(events_log | grep -c 'Crash handled: exit 139')" 1
 expect 'Home Assistant started again' "$(count '.path == "/core/start" and .method == "POST"')" 1
-expect 'cache dropped again' "$(requests "${drop}" | wc -l | tr -d ' ')" 2
+expect 'cache dropped by a privileged helper without network' \
+    "$(requests "${drop}" | jq -c '.body.HostConfig | [.Privileged, .NetworkMode, .ReadonlyRootfs]')" '[true,"none",true]'
+expect 'evidence of the container that crashed, by its ID' \
+    "$(count ".path == \"/containers/${HA_ID}/json\"")|$(count ".path == \"/containers/${HA_ID}/logs\"")" '1|1' 
 expect 'case kept in the private data' "$(find /data/crash_guard/cases -mindepth 1 -maxdepth 1 -name '*-crash' | wc -l | tr -d ' ')" 1
 expect 'with the logs' "$(find /data/crash_guard/cases -name container.log | wc -l | tr -d ' ')" 1
 expect 'without the full hash lists' "$(find /data/crash_guard/cases -name '*.sha' | wc -l | tr -d ' ')" 0
@@ -162,6 +172,24 @@ echo '# Stop'
 kill -TERM "${GUARD}"
 wait_for '! kill -0 "${GUARD}" 2>/dev/null' 15
 expect 'stops on TERM' "$(kill -0 "${GUARD}" 2>/dev/null && echo running || echo stopped)" stopped
+
+echo '# A check whose hash helper fails'
+touch "${FAKE}/hash_fails"
+notified=$(count '.path == "/core/api/services/notify/test"')
+start_guard
+wait_for 'grep -c "Crash Guard active" "${WORK}/log" | grep -q 2' 30
+touch /data/crash_guard/check.request
+wait_for 'events_log | grep -q "Check (no drop) failed"' 30
+expect 'the failure is logged with the answer' "$(events_log | grep -c 'Check (no drop) failed: sha256sum: read error')" 1
+expect 'as an unknown result' "$(tail -1 /data/crash_guard/drops.log | cut -d' ' -f2-)" 'cache=? fresh=- (check failed)'
+expect 'no RAM error reported' "$(count '.path == "/core/api/services/notify/test"')" "${notified}"
+expect 'no case kept' "$(find /data/crash_guard/cases -mindepth 1 -maxdepth 1 -name '*-check' | wc -l | tr -d ' ')" 0
+wait_for '[[ "$(state binary_sensor.test_corrupted_cache .body.state)" == unknown ]]' 15
+expect 'corrupted cache turns unknown' "$(state binary_sensor.test_corrupted_cache .body.state)" unknown
+wait_for '[[ "$(status ".check.when")" != null ]]' 15
+expect 'the page knows when it failed' "$(status '[.check.corrupted, (.check.when != null)] | map(tostring) | join(" ")')" 'null true'
+kill -TERM "${GUARD}"
+wait_for '! kill -0 "${GUARD}" 2>/dev/null' 15
 
 kill "${FAKE_PID}" 2>/dev/null
 if (( FAILED )); then

@@ -1,9 +1,13 @@
 name: CI
+# scripts/check.sh runs the same checks locally; keep the two in step.
 
 on:
   push:
     branches: [main, dev]
   pull_request:
+  schedule:
+    # Weekly, so a change of the base image, the linter or the broker shows up
+    - cron: "17 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -35,9 +39,15 @@ jobs:
           crash_guard/rootfs/usr/local/lib/crash-guard/ref.sh
           crash_guard/rootfs/usr/local/lib/mqtt-device.sh
           tests/test_broker.sh tests/test_guard.sh tests/stubs/*
-          tests/test_app.sh
+          tests/test_app.sh scripts/check.sh
+          crash_guard/rootfs/usr/local/lib/crash-guard/schedule.sh
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
       - name: Python
-        run: pipx run ruff==0.17.3 check crash_guard/rootfs/usr/local tests
+        run: |
+          pip install ruff==0.17.3
+          ruff check crash_guard/rootfs/usr/local tests scripts
 
   test:
     name: Build and test (${{ matrix.arch }})
@@ -104,7 +114,9 @@ jobs:
         run: |
           docker network create ci
           docker run -d --name broker --network ci \
-            -v "${PWD}/tests/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" eclipse-mosquitto:2.1.2-alpine
+            -v "${PWD}/tests/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
+            -v "${PWD}/tests/mosquitto.passwords:/mosquitto/config/passwords:ro" \
+            eclipse-mosquitto:2.1.2-alpine@sha256:75d6662dee52c947dc9dd9c29f1d8d7ffef78ddaf38001caa09755681e8bbc98
       - name: Test
         run: >-
           docker run --rm --network ci -v "${PWD}/tests:/tests:ro" --entrypoint bash

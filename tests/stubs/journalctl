@@ -1,3 +1,13 @@
 #!/bin/bash
-# Stub for journalctl: the same coredump entries for -b and --since
-cat "${CG_FIXTURES:-/tests/fixtures}/journal.json"
+# Stub for journalctl: the same coredump entries for -b and --since; with
+# -n N only the last N
+n=''
+while (( $# )); do
+    [[ "$1" == -n ]] && n=$2
+    shift
+done
+if [[ -n "${n}" ]]; then
+    tail -n "${n}" "${CG_FIXTURES:-/tests/fixtures}/journal.json"
+else
+    cat "${CG_FIXTURES:-/tests/fixtures}/journal.json"
+fi

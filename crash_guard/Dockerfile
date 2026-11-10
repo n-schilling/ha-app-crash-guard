@@ -1,6 +1,6 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/base-debian:trixie
-# hadolint ignore=DL3006
-FROM ${BUILD_FROM}
+# Pinned by version and digest: this image runs with full control over the
+# host, so a moved tag must not change it unnoticed; Dependabot proposes updates
+FROM ghcr.io/home-assistant/base-debian:trixie-2026.11.0@sha256:d996c8f8ef0096a1ac3756766149b31b8171afc663068cc192f2bcab20f1b8c9
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -21,8 +21,11 @@ RUN \
 COPY rootfs /
 
 ARG BUILD_ARCH BUILD_DATE BUILD_DESCRIPTION BUILD_NAME BUILD_REF BUILD_REPOSITORY BUILD_VERSION
-# s6-overlay: warnings and errors only, no per-service start/stop info lines
-ENV S6_VERBOSITY=1
+# s6-overlay: warnings and errors only, no per-service start/stop info lines.
+# The version from config.yaml (the Supervisor passes it as BUILD_VERSION) for
+# the bottom of the web page
+ENV S6_VERBOSITY=1 \
+    APP_VERSION=${BUILD_VERSION}
 LABEL \
     io.hass.name="${BUILD_NAME}" \
     io.hass.description="${BUILD_DESCRIPTION}" \

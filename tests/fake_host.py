@@ -9,7 +9,11 @@ through files in <dir>:
   protected     present: the app runs in protection mode
   ha_stopped    present: the Home Assistant container is not running; a
                 POST /core/start removes it
-Helper containers answer with the last line their command would print.
+  hash_fails    present: the hash helper answers with an error instead of a
+                result
+The Home Assistant container has the ID HA_ID; a crashed one that the
+watchdog already replaced is any other ID. Helper containers answer with the
+last line their command would print.
 """
 
 import json
@@ -25,6 +29,7 @@ DIR = Path(sys.argv[1])
 SOCKET = "/run/docker.sock"
 LOCK = threading.Lock()
 HELPERS: dict[str, dict] = {}
+HA_ID = "0123456789ab0123456789ab0123456789ab0123456789ab0123456789abcdef"
 
 
 def record(api, method, path, body):
@@ -35,6 +40,8 @@ def record(api, method, path, body):
 def helper_output(entrypoint, cmd):
     """The last line the helper's command would print."""
     if entrypoint == "/usr/local/bin/cg-hash.sh":
+        if (DIR / "hash_fails").exists():
+            return "sha256sum: read error"
         return "hashed=3 mismatches=0"
     if entrypoint == "/usr/local/bin/cg-pfn.py":
         return "pages=0"
@@ -92,13 +99,13 @@ class Docker(Handler):
             return self.reply(body={"Image": "sha256:feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface",
                                     "Mounts": [{"Destination": "/data",
                                                 "Source": "/mnt/data/supervisor/apps/data/c3edd230_crash_guard"}]})
-        if path == "/containers/homeassistant/json":
+        if path in ("/containers/homeassistant/json", f"/containers/{HA_ID}/json"):
             return self.reply(body={
                 "Image": "sha256:0123456789abcdef0123456789abcdef",
                 "State": {"Running": not (DIR / "ha_stopped").exists(), "ExitCode": 0},
                 "GraphDriver": {"Data": {"LowerDir": "/mnt/data/docker/overlay2/a/diff",
                                          "UpperDir": "/mnt/data/docker/overlay2/b/diff"}}})
-        if path == "/containers/homeassistant/logs":
+        if path in ("/containers/homeassistant/logs", f"/containers/{HA_ID}/logs"):
             return self.reply(text="2026-10-07T12:00:00Z Segmentation fault\n")
         if path == "/events":
             since, until = int(query["since"][0]), int(query["until"][0])

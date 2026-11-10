@@ -33,8 +33,19 @@ readonly STATUS="${PRIV}/status.json"
 # Longest a helper container may run, in seconds (hashing takes minutes)
 readonly HELPER_TIMEOUT=3600
 readonly HELPER=crash_guard_helper
+# Longest the helper that locates corrupted pages may run, in seconds
+readonly LOCATE_TIMEOUT=600
 # 132 SIGILL, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE, 139 SIGSEGV
 readonly CRASH_CODES=' 132 134 135 136 139 '
+
+# The Supervisor token and the MQTT password never go on a command line,
+# where every process allowed to list processes could read them: curl takes
+# the header from a file, mosquitto_pub and mosquitto_sub their credentials
+# from their options files, all in a folder only root can read
+readonly SECRETS=/run/crash-guard
+mkdir -p "${SECRETS}" && chmod 700 "${SECRETS}"
+readonly AUTH="${SECRETS}/supervisor.header"
+(umask 077 && printf 'Authorization: Bearer %s\n' "${SUPERVISOR_TOKEN}" > "${AUTH}")
 
 bashio::config.has_value 'log_level' && bashio::log.level "$(bashio::config 'log_level')"
 INTERVAL=$(bashio::config 'check_interval')
@@ -57,6 +68,8 @@ readonly INTERVAL MAX_RESTARTS VERIFY DROP_ON_SCHEDULE RAM_LOCK NOTIFY ENTITY_PR
 # defective page; cg-lock.py builds it from bad_pages
 # shellcheck source=../../../../usr/local/lib/crash-guard/lock.sh
 source /usr/local/lib/crash-guard/lock.sh
+# shellcheck source=../../../../usr/local/lib/crash-guard/schedule.sh
+source /usr/local/lib/crash-guard/schedule.sh
 declare -a LOCK_BLOCKS=()
 lock_layout "${BAD_PAGES[@]}"
 readonly LOCK_NAME LOCK_RANGE LOCK_BLOCKS
@@ -65,13 +78,14 @@ readonly LOCK_EVERY=3600
 readonly LOCK_ENTITY="binary_sensor.${ENTITY_PREFIX}_memory_lock_problem"
 readonly CHECK_ENTITY="binary_sensor.${ENTITY_PREFIX}_corrupted_cache"
 readonly CRASH_ENTITY="binary_sensor.${ENTITY_PREFIX}_crashes"
-# How often the host journal is read for program crashes, in seconds
-readonly JOURNAL_EVERY=60
+# How often the newest coredump in the host journal is looked up, and how
+# often the crashes are counted again regardless, in seconds
+readonly JOURNAL_EVERY=60 CRASHES_EVERY=900
 
 mkdir -p "${PRIV}/ref" "${PRIV}/tmp"
 
 dock() { curl -sf --unix-socket /run/docker.sock "http://localhost$1" "${@:2}"; }
-sv()   { curl -sf -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" "http://supervisor$1" "${@:2}"; }
+sv()   { curl -sf -H "@${AUTH}" "http://supervisor$1" "${@:2}"; }
 ts()   { date +%Y%m%d-%H%M%S; }
 event() { echo "$(date -Iseconds) $*" >> "${PRIV}/events.log"; bashio::log.info "$*"; }
 
@@ -82,13 +96,13 @@ SELF=$(sv /addons/self/info)
 if [[ "$(jq -r '.data.protected' <<< "${SELF}")" == true || ! -S /run/docker.sock ]]; then
     readonly PROTECTED_MSG='Please deactivate the protection mode for this app: open Crash Guard under Settings > Apps, turn off "Protection mode" and start the app again. Crash Guard needs access to Docker to catch crashes and to check the page cache.'
     jq -nc --arg m "${PROTECTED_MSG}" '{title: "Crash Guard is not running", message: $m, notification_id: "crash_guard_protection_mode"}' \
-        | curl -sf -o /dev/null -X POST -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        | curl -sf -o /dev/null -X POST -H "@${AUTH}" \
             -H 'Content-Type: application/json' -d @- \
             http://supervisor/core/api/services/persistent_notification/create
     bashio::exit.nok "${PROTECTED_MSG}"
 fi
 # Started fine: take down the notification of an earlier start, if any
-curl -sf -o /dev/null -X POST -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+curl -sf -o /dev/null -X POST -H "@${AUTH}" \
     -H 'Content-Type: application/json' -d '{"notification_id": "crash_guard_protection_mode"}' \
     http://supervisor/core/api/services/persistent_notification/dismiss
 
@@ -103,7 +117,7 @@ DISCOVERY_PREFIX=$(bashio::config 'discovery_prefix')
 if bashio::services.available 'mqtt'; then
     MQ=(-h "$(bashio::services mqtt 'host')" -p "$(bashio::services mqtt 'port')")
     if bashio::var.has_value "$(bashio::services mqtt 'username')"; then
-        MQ+=(-u "$(bashio::services mqtt 'username')" -P "$(bashio::services mqtt 'password')")
+        cg_credentials "${SECRETS}" "$(bashio::services mqtt 'username')" "$(bashio::services mqtt 'password')"
     fi
     MQTT=1
 fi
@@ -146,10 +160,11 @@ prepare_layers() {
     echo "${PRIV}/ref/$(jq -r '.Image' <<< "${st}" | cut -d: -f2 | cut -c1-12).sha"
 }
 
-# Short-lived helper container from the own image
+# Short-lived helper container from the own image; it runs at most
+# HELPER_WAIT seconds (default HELPER_TIMEOUT)
 # helper <HostConfig as jq expression> <command> [arguments...] -> last output line
 helper() {
-    local hostcfg=$1 body id argv
+    local hostcfg=$1 body id argv limit=${HELPER_WAIT:-${HELPER_TIMEOUT}}
     shift
     dock "/containers/${HELPER}?force=1" -X DELETE >/dev/null 2>&1
     # Arguments as a JSON array, one element per argument, even when one spans
@@ -164,8 +179,8 @@ helper() {
         return 1
     fi
     dock "/containers/${id}/start" -X POST >/dev/null
-    if ! dock "/containers/${id}/wait" -X POST -m "${HELPER_TIMEOUT}" >/dev/null; then
-        bashio::log.error "Helper container $1 did not finish within ${HELPER_TIMEOUT}s - removed"
+    if ! dock "/containers/${id}/wait" -X POST -m "${limit}" >/dev/null; then
+        bashio::log.error "Helper container $1 did not finish within ${limit}s - removed"
     fi
     dock "/containers/${id}/logs?stdout=1&stderr=1" | tr -d '\r' | tail -1
     dock "/containers/${id}?force=1" -X DELETE >/dev/null
@@ -178,13 +193,14 @@ run_helper() {
              NetworkMode:"none", ReadonlyRootfs:true}' /usr/local/bin/cg-hash.sh "$@"
 }
 
-# Reference = files that hashed identically from the cache and after a drop
+# Reference = files that hashed identically from the cache and straight from
+# the drive (O_DIRECT, past the page cache). The cache is never dropped for
+# it: a drop frees the defective page for freshly started programs.
 build_ref() {
     local ref=$1 t1="${PRIV}/tmp/ref1.sha" t2="${PRIV}/tmp/ref2.sha" diff name
     bashio::log.info 'Building reference hashes for the current Home Assistant image...'
     run_helper "${LAYERS}" "${t1}" >/dev/null
-    drop_cache
-    run_helper "${LAYERS}" "${t2}" >/dev/null
+    run_helper --direct "${LAYERS}" "${t2}" >/dev/null
     awk 'NR == FNR { a[$2] = $1; next } ($2 in a) && a[$2] == $1' "${t1}" "${t2}" > "${ref}"
     diff=$(awk 'NR == FNR { a[$2] = $1; next } ($2 in a) && a[$2] != $1 { print $2 }' "${t1}" "${t2}" \
         | tee "${PRIV}/tmp/ref-inconsistent.txt" | wc -l)
@@ -194,6 +210,7 @@ build_ref() {
         mv "${PRIV}/tmp/ref-inconsistent.txt" "${WORK}/"
         keep_case "${name}"
     fi
+    rm -f "${PRIV}/tmp/ref-inconsistent.txt"
     rm -f "${t1}" "${t2}"
     find "${PRIV}/ref" -name '*.sha' ! -path "${ref}" -delete
 }
@@ -204,7 +221,7 @@ build_ref() {
 locate_pages() {
     local r
     [[ -s "$1" ]] || return 0
-    r=$(helper '{Privileged:true, NetworkMode:"none", ReadonlyRootfs:true,
+    r=$(HELPER_WAIT=${LOCATE_TIMEOUT} helper '{Privileged:true, NetworkMode:"none", ReadonlyRootfs:true,
                  Binds:["/mnt/data/docker/overlay2:/mnt/data/docker/overlay2:ro", $hpw]}' \
         /usr/local/bin/cg-pfn.py "$1" "${PRIV}/badpages.log" "$2")
     event "Physical addresses located (${2}): ${r} -> $(known_pages)"
@@ -239,19 +256,40 @@ new_case() {
 readonly CASES="${PRIV}/cases"
 readonly ROTATE=/usr/local/lib/crash-guard/rotate.sh
 
+# Sets KEPT to the name the case was kept under: $1, or a second later when a
+# case of that name exists. When the case cannot be kept, the working folder
+# stays until the next case and KEPT names it.
+KEPT=''
 keep_case() {
+    local name=$1 at
+    KEPT="tmp/case"
     rm -f -- "${WORK}"/*.sha
     mkdir -p "${CASES}"
-    mv -T -- "${WORK}" "${CASES}/$1" || bashio::log.error "Case $1 could not be kept"
-    rm -rf "${WORK}"
-    bash "${ROTATE}" "${CASES}" "${CASES_TO_KEEP}" > /dev/null
+    for _ in 1 2 3 4 5; do
+        if [[ ! -e "${CASES}/${name}" ]] && mv -T -- "${WORK}" "${CASES}/${name}" 2> /dev/null; then
+            KEPT=${name}
+            bash "${ROTATE}" "${CASES}" "${CASES_TO_KEEP}" > /dev/null
+            return 0
+        fi
+        # yyyymmdd-hhmmss-kind: the same kind a second later
+        at=$(date -d "${name:0:4}-${name:4:2}-${name:6:2} ${name:9:2}:${name:11:2}:${name:13:2}" +%s) || break
+        name="$(date -d "@$(( at + 1 ))" +%Y%m%d-%H%M%S)-${name:16}"
+    done
+    bashio::log.error "Case $1 could not be kept; its files stay in ${PRIV}/tmp/case until the next case"
+    return 1
 }
 
-count_of() { sed -n 's/.*mismatches=\([0-9-]*\).*/\1/p' <<< "$1"; }
+# The number of corrupted files a hash helper reported; empty when it did not
+# report one (it failed, timed out or had no reference)
+count_of() { sed -n 's/.*mismatches=\([0-9][0-9]*\).*/\1/p' <<< "$1"; }
 
 scheduled_drop() {
-    local ref d r1 r2
-    ref=$(prepare_layers) || { drop_cache; return; }
+    local ref d r1 r2 c1 c2
+    if ! ref=$(prepare_layers); then
+        echo "$(date -Iseconds) cache=? fresh=- (check failed)" >> "${PRIV}/drops.log"
+        event 'Check skipped: the Home Assistant container could not be read'
+        return
+    fi
     if [[ ! -s "${ref}" ]]; then
         build_ref "${ref}"
         return
@@ -273,13 +311,17 @@ scheduled_drop() {
     r2=$(run_helper "${LAYERS}" "${WORK}/fresh.sha" "${ref}" "${WORK}/fresh_files")
     take_changes "${ref}" "${WORK}/fresh.changed"
     locate_pages "${WORK}/fresh.mismatch" drop-fresh
-    echo "$(date -Iseconds) cache=$(count_of "${r1}") fresh=$(count_of "${r2}")" >> "${PRIV}/drops.log"
-    if [[ "$(count_of "${r1}")" == 0 && "$(count_of "${r2}")" == 0 ]]; then
+    c1=$(count_of "${r1}") c2=$(count_of "${r2}")
+    echo "$(date -Iseconds) cache=${c1:-?} fresh=${c2:-?}" >> "${PRIV}/drops.log"
+    if [[ "${c1}" == 0 && "${c2}" == 0 ]]; then
         rm -rf "${WORK}"
         event 'Cache dropped (scheduled), no corrupted files'
+    elif (( ${c1:-0} + ${c2:-0} == 0 )); then
+        rm -rf "${WORK}"
+        event "Cache dropped (scheduled), check failed: ${r1:-no answer} / ${r2:-no answer}"
     else
         keep_case "${d}"
-        event "Cache dropped (scheduled): CORRUPTED in cache $(count_of "${r1}"), freshly read $(count_of "${r2}") (case ${d})"
+        event "Cache dropped (scheduled): CORRUPTED in cache ${c1:-?}, freshly read ${c2:-?} (case ${KEPT})"
     fi
 }
 
@@ -294,6 +336,14 @@ scheduled_check() {
     r1=$(run_helper "${LAYERS}" "${WORK}/cache.sha" "${ref}" "${WORK}/cache_files")
     take_changes "${ref}" "${WORK}/cache.changed"
     n=$(count_of "${r1}")
+    if [[ -z "${n}" ]]; then
+        # No result is no finding: the sensor turns unknown, nobody is told
+        # about a RAM error that may not exist
+        rm -rf "${WORK}"
+        echo "$(date -Iseconds) cache=? fresh=- (check failed)" >> "${PRIV}/drops.log"
+        event "Check (no drop) failed: ${r1:-no answer from the hash helper}"
+        return
+    fi
     locate_pages "${WORK}/cache.mismatch" check-cache
     echo "$(date -Iseconds) cache=${n} fresh=- (no drop)" >> "${PRIV}/drops.log"
     if [[ "${n}" == 0 ]]; then
@@ -301,8 +351,8 @@ scheduled_check() {
         event 'Check (no drop): no corrupted files in the cache'
     else
         keep_case "${d}"
-        event "Check (no drop): CORRUPTED in cache ${n}, cache deliberately NOT dropped (case ${d})"
-        notify 'Crash Guard: RAM error in the cache' "At the check at $(date +%H:%M), ${n} Home Assistant file(s) in the page cache were corrupted. The cache was deliberately not dropped (otherwise the defective page moves to freshly started programs). Known defective RAM pages: $(known_pages). Details: case ${d} on the Crash Guard page"
+        event "Check (no drop): CORRUPTED in cache ${n}, cache deliberately NOT dropped (case ${KEPT})"
+        notify 'Crash Guard: RAM error in the cache' "At the check at $(date +%H:%M), ${n} Home Assistant file(s) in the page cache were corrupted. The cache was deliberately not dropped (otherwise the defective page moves to freshly started programs). Known defective RAM pages: $(known_pages). Details: case ${KEPT} on the Crash Guard page"
     fi
 }
 
@@ -339,12 +389,12 @@ core_job_running() {
         | select(.done == false and (.name | test("^(home_assistant_core|backup)")))] | length > 0' >/dev/null
 }
 
-ha_api_up() { curl -sf -o /dev/null -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" http://supervisor/core/api/; }
+ha_api_up() { curl -sf -o /dev/null -H "@${AUTH}" http://supervisor/core/api/; }
 
 notify() {
     [[ -n "${NOTIFY}" ]] || return 0
     jq -nc --arg t "$1" --arg m "$2" '{title:$t, message:$m}' \
-        | curl -sf -o /dev/null -X POST -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        | curl -sf -o /dev/null -X POST -H "@${AUTH}" \
             -H 'Content-Type: application/json' -d @- \
             "http://supervisor/core/api/services/${NOTIFY%%.*}/${NOTIFY#*.}" \
         || bashio::log.warning 'Notification failed'
@@ -382,7 +432,7 @@ send_state() {
         SENT[$1]=${PAYLOAD[$1]}
         return 0
     fi
-    curl -sf -o /dev/null -X POST -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+    curl -sf -o /dev/null -X POST -H "@${AUTH}" \
         -H 'Content-Type: application/json' -d "${PAYLOAD[$1]}" \
         "http://supervisor/core/api/states/$1"
 }
@@ -419,7 +469,7 @@ state_missing() {
     (( MQTT )) && return 1
     local e
     for e in "${!PAYLOAD[@]}"; do
-        [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "@${AUTH}" \
             "http://supervisor/core/api/states/${e}")" == 404 ]] && return 0
     done
     return 1
@@ -560,20 +610,31 @@ status_cycle() {
     (( MQTT )) && printf 'online' | cg_pub "${CG_AVAIL}" 2> /dev/null
 }
 
+# $1 = exit code, $2 = time (epoch seconds), $3 = ID of the container that
+# exited, from its die event
 handle_crash() {
-    local code=$1 when=$2 st d ref r1='' r2=''
-    st=$(ha_state)
+    local code=$1 when=$2 id=$3 st d ref r1='' r2=''
     d=$(new_case crash)
     bashio::log.warning "Home Assistant container exited with ${code} (${when}) - saving evidence (case ${d})"
 
     # 1. Evidence, while the cache still holds the faulty state; collected in
-    # the private working folder and kept with the case at the end
-    jq '.State' <<< "${st}" > "${WORK}/state.json" 2>/dev/null
-    dock '/containers/homeassistant/logs?stdout=1&stderr=1&tail=400&timestamps=1' > "${WORK}/container.log"
-    # Only a regular file: a symlink there could point to secrets.yaml
-    if [[ -f /homeassistant/home-assistant.log.fault && ! -L /homeassistant/home-assistant.log.fault ]]; then
-        cp -P -- /homeassistant/home-assistant.log.fault "${WORK}/" 2>/dev/null
+    # the private working folder and kept with the case at the end. Asked by
+    # the ID of the container that crashed: the Supervisor's watchdog may
+    # already have replaced it, and a container of the same name would show
+    # the new start instead of the crash.
+    [[ "${id}" =~ ^[0-9a-f]{12,64}$ ]] || id=''
+    if [[ -n "${id}" ]] && st=$(dock "/containers/${id}/json"); then
+        jq '.State' <<< "${st}" > "${WORK}/state.json" 2>/dev/null
+        dock "/containers/${id}/logs?stdout=1&stderr=1&tail=400&timestamps=1" > "${WORK}/container.log"
+    else
+        jq -n --argjson c "${code}" \
+            '{ExitCode:$c, Error:"The crashed container was already replaced; its state and log are gone"}' \
+            > "${WORK}/state.json"
     fi
+    # Only a regular file with a single name (a symlink or a hard link there
+    # could point to secrets.yaml), and only its last MB
+    python3 /usr/local/bin/cg-copy.py --tail 1048576 --single-link \
+        /homeassistant/home-assistant.log.fault "${WORK}/home-assistant.log.fault" 2> /dev/null
     journalctl -D /var/log/journal --since '-30min' -t systemd-coredump -o short-iso > "${WORK}/coredumps.txt" 2>/dev/null
     journalctl -D /var/log/journal --since '-30min' -k -o short-iso > "${WORK}/kernel.txt" 2>/dev/null
     ref=$(prepare_layers)
@@ -605,37 +666,26 @@ handle_crash() {
     fi
     keep_case "${d}"
 
-    local up='unreachable'
+    local up='unreachable' c1 c2
     ha_api_up && up='running again'
-    event "Crash handled: exit ${code}, corrupted in cache $(count_of "${r1}"), afterwards $(count_of "${r2}"), Home Assistant ${up} (case ${d})"
-    notify 'Home Assistant crash handled' "Home Assistant crashed at $(date -d "@${when}" +%H:%M) (exit ${code}). Page cache dropped, Home Assistant ${up}. Corrupted files in the cache: $(count_of "${r1}" | sed 's/^$/unknown/'). Known defective RAM pages: $(known_pages). Evidence: case ${d} on the Crash Guard page"
+    c1=$(count_of "${r1}") c2=$(count_of "${r2}")
+    event "Crash handled: exit ${code}, corrupted in cache ${c1:-?}, afterwards ${c2:-?}, Home Assistant ${up} (case ${KEPT})"
+    notify 'Home Assistant crash handled' "Home Assistant crashed at $(date -d "@${when}" +%H:%M) (exit ${code}). Page cache dropped, Home Assistant ${up}. Corrupted files in the cache: ${c1:-unknown}. Known defective RAM pages: $(known_pages). Evidence: case ${KEPT} on the Crash Guard page"
 }
 
 # Returns the Home Assistant container's events since $1 (nanoseconds) as
-# "time_ns action exitcode" - "kill" marks an intended stop, "start" a
-# (re)start of Home Assistant, after which it has forgotten states set by apps
+# "time_ns action exitcode container_id" - "kill" marks an intended stop,
+# "start" a (re)start of Home Assistant, after which it has forgotten states
+# set by apps
 ha_events() {
     dock "/events?since=$(( $1 / 1000000000 ))&until=$(date +%s)&filters=$(jq -rn \
         '{type:["container"], event:["kill","die","start"]} | @json | @uri')" \
     | jq -r --argjson since "$1" 'select(.Actor.Attributes.name == "homeassistant" and .timeNano > $since)
-        | "\(.timeNano) \(.Action) \(.Actor.Attributes.exitCode // "-")"'
+        | "\(.timeNano) \(.Action) \(.Actor.Attributes.exitCode // "-") \(.Actor.ID // .id // "-")"'
 }
 
 # --- MQTT: availability and discovery ------------------------------------------
-# A connection held open with a last will marks the entities unavailable if
-# the app dies; a regular stop publishes "offline" itself
-HOLD_SUB='' HOLDER=''
-hold_availability() {
-    trap '[[ -n "${HOLD_SUB}" ]] && kill "${HOLD_SUB}" 2>/dev/null; exit 0' TERM
-    while true; do
-        mosquitto_sub "${MQ[@]}" -i "${HOSTNAME}-availability" -q 1 -t "${CG_AVAIL}" \
-            --will-topic "${CG_AVAIL}" --will-payload offline --will-retain --will-qos 1 \
-            > /dev/null 2>&1 &
-        HOLD_SUB=$!
-        wait "${HOLD_SUB}"
-        sleep 10
-    done
-}
+HOLDER=''
 stop() {
     trap - EXIT TERM INT
     # Without a broker the last will of the held connection says offline
@@ -645,7 +695,7 @@ stop() {
 }
 
 if (( MQTT )); then
-    hold_availability &
+    cg_hold_availability &
     HOLDER=$!
     trap stop EXIT TERM INT
     entities=(corrupted_cache crashes)
@@ -668,12 +718,20 @@ fi
 
 # --- Main loop -------------------------------------------------------------------
 declare -a RESTARTS=()
+declare -A DONE_AT=()
 LAST_NS=$(date +%s%N)
 LAST_KILL=0
-LAST_DROP=''
 LAST_STATUS=0
 LAST_SEEN=$(date +%s)
 LAST_JOURNAL=0
+LAST_CRASHES=0
+LAST_CURSOR=''
+
+# Check times already past at the start are not caught up
+START=$(date +%s)
+for t in "${DROP_TIMES[@]}"; do
+    schedule_due "${t}" "${START}" '' && DONE_AT[${t}]=$(schedule_key "${t}" "${START}")
+done
 
 rm -f -- "${RUNNING}"
 REF=$(prepare_layers) && [[ ! -s "${REF}" ]] && build_ref "${REF}"
@@ -690,18 +748,18 @@ fi
 bashio::log.info "Crash Guard active: ${plan}, crash check every ${INTERVAL}s, ${lock}, known defective pages: $(known_pages)"
 
 while true; do
-    now=$(date +%H:%M)
     for t in "${DROP_TIMES[@]}"; do
-        if [[ "${now}" == "${t}" && "${LAST_DROP}" != "$(date +%F) ${t}" ]]; then
-            LAST_DROP="$(date +%F) ${t}"
+        now=$(date +%s)
+        if schedule_due "${t}" "${now}" "${DONE_AT[${t}]:-}"; then
+            DONE_AT[${t}]=$(schedule_key "${t}" "${now}")
             scheduled_drop
-            LAST_STATUS=0
+            LAST_STATUS=0 LAST_CRASHES=0
         fi
     done
     requested_check && LAST_STATUS=0
 
-    crash_code='' crash_at=''
-    while read -r ns action code; do
+    crash_code='' crash_at='' crash_id=''
+    while read -r ns action code id; do
         [[ -z "${ns}" ]] && continue
         LAST_NS="${ns}"
         if [[ "${action}" == start ]]; then
@@ -713,7 +771,7 @@ while true; do
                 event "Exit ${code} after an intended stop - only logged, nothing done"
             elif [[ -z "${crash_code}" ]]; then
                 # several crashes in one interval (watchdog loop) = one case
-                crash_code="${code}" crash_at=$(( ns / 1000000000 ))
+                crash_code="${code}" crash_at=$(( ns / 1000000000 )) crash_id="${id}"
             fi
         fi
     done < <(ha_events "${LAST_NS}")
@@ -723,18 +781,25 @@ while true; do
         mapfile -t RESTARTS < <(printf '%s\n' "${RESTARTS[@]}" | awk -v c="${cutoff}" '$1 > c')
         if [[ "${#RESTARTS[@]}" -ge "${MAX_RESTARTS}" ]]; then
             event "Crash (exit ${crash_code}) NOT handled: limit of ${MAX_RESTARTS}/h reached"
-            LAST_JOURNAL=0
         else
             RESTARTS+=("$(date +%s)")
-            handle_crash "${crash_code}" "${crash_at}"
-            LAST_STATUS=0 LAST_JOURNAL=0
+            handle_crash "${crash_code}" "${crash_at}" "${crash_id}"
+            LAST_STATUS=0
             # crashes during the handling belong to this case
             LAST_NS=$(date +%s%N)
         fi
+        LAST_JOURNAL=0 LAST_CRASHES=0
     fi
+    # The host journal: a cheap look at its newest coredump every minute; the
+    # crashes are counted again only when there is a new one, after a crash
+    # of Home Assistant, and every CRASHES_EVERY seconds for the window
     if (( $(date +%s) - LAST_JOURNAL >= JOURNAL_EVERY )); then
         LAST_JOURNAL=$(date +%s)
-        publish_crashes
+        cursor=$(crash_cursor)
+        if [[ "${cursor}" != "${LAST_CURSOR}" ]] || (( LAST_JOURNAL - LAST_CRASHES >= CRASHES_EVERY )); then
+            LAST_CURSOR=${cursor} LAST_CRASHES=${LAST_JOURNAL}
+            publish_crashes
+        fi
     fi
     # Status hourly, right after the start, after a check and after a crash
     if (( $(date +%s) - LAST_STATUS >= LOCK_EVERY )); then

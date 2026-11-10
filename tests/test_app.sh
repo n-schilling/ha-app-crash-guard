@@ -1,6 +1,8 @@
 #!/bin/bash
-# Tests for Crash Guard's lock layout, the RAM lock tool (cg-lock.py), the hash
-# helper (cg-hash.sh) and the page helper's path checks (cg-pfn.py). Run inside
+# Tests for Crash Guard's lock layout, the check schedule, the RAM lock tool
+# (cg-lock.py), the hash helpers (cg-hash.sh, cg-direct-hash.py), the copy
+# tool (cg-copy.py), the page helper's path checks (cg-pfn.py) and the
+# entities. Run inside
 # the built image, as root (the hash helper only reads Docker layer paths):
 #   docker run --rm -v "$PWD/tests:/tests:ro" <image> bash /tests/test_app.sh
 # The boot partition and the device tree are fakes under a temporary folder.
@@ -21,6 +23,10 @@ expect() {
         FAILED=1
     fi
 }
+
+echo '# Image'
+expect 'the version from config.yaml for the web page' \
+    "$([[ "${APP_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo set || echo "missing: '${APP_VERSION:-}'")" set
 
 echo '# Lock layout (lock.sh)'
 # shellcheck source=/dev/null
@@ -47,6 +53,20 @@ expect 'logged pages: only well-formed numbers' "$(logged_pfns "${WORK}/badpages
 lock_layout 0x1cc447
 expect 'pages outside the lock' "$(pages_outside "${WORK}/badpages.log")" 0x5000
 expect 'no code ran from the log' "$([[ -e /tmp/pwned2 ]] && echo ran || echo none)" none
+
+echo '# Check schedule (schedule.sh)'
+# shellcheck source=/dev/null
+source /usr/local/lib/crash-guard/schedule.sh
+at() { date -d "2026-11-10 $1" +%s; }
+due() { schedule_due "$1" "$(at "$2")" "${3:-}" && echo due || echo no; }
+expect 'not before its time' "$(due 04:30 04:29:59)" no
+expect 'in its minute' "$(due 04:30 04:30:05)" due
+expect 'also when the loop comes late' "$(due 04:30 04:33:00)" due
+expect 'but not hours late' "$(due 04:30 05:31:00)" no
+expect 'once a day' "$(due 04:30 04:35:00 '2026-11-10 04:30')" no
+expect 'again the next day' "$(schedule_due 04:30 "$(date -d '2026-11-11 04:30:10' +%s)" '2026-11-10 04:30' && echo due)" due
+expect 'its key' "$(schedule_key 16:30 "$(at 16:31:00)")" '2026-11-10 16:30'
+expect 'an impossible time is never due' "$(due 25:00 23:59:00)" no
 
 echo '# RAM lock tool (cg-lock.py)'
 export CG_DT="${WORK}/dt" CG_BOOT="${WORK}/boot"
@@ -166,6 +186,37 @@ expect 'lists it with both hashes' "$(cut -d' ' -f1 "${WORK}/case3/cache.changed
 expect 'keeps no copy of a changed file' "$([[ -d "${WORK}/case3/files" ]] && echo copied || echo none)" none
 expect 'drive not readable: counted as corrupted' "$(hash_with fail case4)" 'hashed=3 mismatches=1 changed=0'
 
+echo '# Hash helper: straight from the drive (--direct, cg-direct-hash.py)'
+r=$(bash /usr/local/bin/cg-hash.sh --direct "${WORK}/layers.txt" "${WORK}/direct.sha")
+if [[ "${r}" == 'hashed=0 mismatches=-' ]]; then
+    # O_DIRECT is not possible on every file system a test container runs on
+    echo "skip  O_DIRECT not supported here: ${r}"
+else
+    expect 'hashes every file of the layers' "${r}" 'hashed=3 mismatches=-'
+    bash /usr/local/bin/cg-hash.sh "${WORK}/layers.txt" "${WORK}/cached.sha" > /dev/null
+    expect 'with the same hashes as from the cache' \
+        "$(sort -k2 "${WORK}/cached.sha" | cmp -s - <(sort -k2 "${WORK}/direct.sha") && echo same)" same
+fi
+mkfifo "${layer}/usr/lib/fifo.so"
+expect 'a FIFO neither blocks nor counts' \
+    "$(printf '%s\0' "${layer}/usr/lib/fifo.so" | timeout 10 python3 /usr/local/bin/cg-direct-hash.py | wc -l | tr -d ' ')" 0
+rm -f "${layer}/usr/lib/fifo.so"
+
+echo '# Hash helper: copies of corrupted files are limited'
+many=${L}/$(printf 'd%.0s' {1..64})/diff
+mkdir -p "${many}/usr/lib" "${WORK}/many"
+for i in $(seq 1 25); do echo "file ${i}" > "${many}/usr/lib/f${i}.so"; done
+head -c $(( 11 * 1024 * 1024 )) /dev/zero > "${many}/usr/lib/big.so"
+printf '%s\n' "${many}" > "${WORK}/layers3.txt"
+bash /usr/local/bin/cg-hash.sh "${WORK}/layers3.txt" "${WORK}/many/ref.sha" > /dev/null
+for f in "${many}"/usr/lib/*; do echo changed >> "${f}"; done
+expect 'every corrupted file is listed' \
+    "$(DISK=other PATH="${WORK}/bin:${PATH}" bash /usr/local/bin/cg-hash.sh "${WORK}/layers3.txt" "${WORK}/many/c.sha" "${WORK}/many/ref.sha" "${WORK}/many/files")" \
+    'hashed=26 mismatches=26 changed=0'
+expect 'but at most 20 copied' "$(find "${WORK}/many/files" -type f | wc -l | tr -d ' ')" 20
+expect 'none larger than 10 MB' "$(find "${WORK}/many/files" -type f -size +10M | wc -l | tr -d ' ')" 0
+rm -rf "${many%/diff}"
+
 echo '# Reference update (ref.sh)'
 # shellcheck source=/dev/null
 source /usr/local/lib/crash-guard/ref.sh
@@ -195,7 +246,7 @@ mkdir -p "${WORK}/case2"
 cp "${WORK}/ref.sha" "${WORK}/case2/ref.sha"
 echo changed-again > "${layer}/usr/lib/a.so"
 bash /usr/local/bin/cg-hash.sh "${WORK}/layers.txt" "${WORK}/case2/c.sha" "${WORK}/case2/ref.sha" "${WORK}/case2/files" > /dev/null
-expect 'only files of the listed layers are copied' "$(find "${WORK}/case2/files" -type f ! -name "$(printf 'a%.0s' {1..64})*" | wc -l | tr -d ' ')" 0
+expect 'only files of the listed layers are copied' "$(find "${WORK}/case2/files" -type f ! -name "$(printf 'a%.0s' {1..64})*" 2> /dev/null | wc -l | tr -d ' ')" 0
 rm -rf "${sneaky%/mnt/*}"
 
 echo '# Copy without following symlinks (cg-copy.py)'
@@ -210,27 +261,49 @@ ln -s /etc/hostname "${layer}/usr/share/link.txt"
 expect 'a symlink as the file is refused' "$(copy "${layer}/usr/share/link.txt" link)" refused
 expect 'a path with .. is refused' "$(copy "${layer}/usr/../usr/share/plain.txt" dots)" refused
 expect 'an existing target is not overwritten' "$(copy "${layer}/usr/share/plain.txt" plain)" refused
-rm -f "${layer}/usr/linkdir" "${layer}/usr/share/link.txt"
+mkfifo "${layer}/usr/share/fifo"
+expect 'a FIFO is refused without blocking' \
+    "$(timeout 10 python3 /usr/local/bin/cg-copy.py "${layer}/usr/share/fifo" "${WORK}/copy/fifo" && echo copied || echo refused)" refused
+seq 1 1000 > "${layer}/usr/share/long.log"
+python3 /usr/local/bin/cg-copy.py --tail 13 "${layer}/usr/share/long.log" "${WORK}/copy/tail"
+expect '--tail keeps only the end' "$(tr '\n' ' ' < "${WORK}/copy/tail")" '998 999 1000 '
+expect '--max refuses a larger file' \
+    "$(python3 /usr/local/bin/cg-copy.py --max 100 "${layer}/usr/share/long.log" "${WORK}/copy/max" && echo copied || echo refused)" refused
+ln "${layer}/usr/share/plain.txt" "${layer}/usr/share/hardlink.txt"
+expect '--single-link refuses a hard link' \
+    "$(python3 /usr/local/bin/cg-copy.py --single-link "${layer}/usr/share/plain.txt" "${WORK}/copy/hard" && echo copied || echo refused)" refused
+rm -f "${layer}/usr/linkdir" "${layer}/usr/share/link.txt" "${layer}/usr/share/fifo" "${layer}/usr/share/hardlink.txt"
 
 echo '# Page helper path checks (cg-pfn.py)'
 ln -s /etc/hostname "${layer}/usr/lib/link.so"
-checks=$(LAYER="${layer}" python3 - <<'PY'
-import os, sys
-sys.argv = ["cg-pfn.py"]
-exec(open("/usr/local/bin/cg-pfn.py").read().split("def main")[0])
+mkdir -p "${layer}/usr/real"
+echo x > "${layer}/usr/real/a.so"
+ln -s "${layer}/usr/real" "${layer}/usr/via"
+mkfifo "${layer}/usr/lib/fifo.so"
+checks=$(LAYER="${layer}" timeout 20 python3 - <<'PY'
+import importlib.util, os
+spec = importlib.util.spec_from_file_location("pfn", "/usr/local/bin/cg-pfn.py")
+pfn = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pfn)
 layer = os.environ["LAYER"]
-print(" ".join(str(layer_file(p)) for p in (
+print(" ".join(str(pfn.open_layer_file(p) is not None) for p in (
     f"{layer}/usr/lib/a.so",                      # a layer file
     "/etc/hostname",                              # outside the layers
     f"{layer}/../../../../../etc/hostname",       # escapes with ..
     f"{layer}/usr/lib/link.so",                   # symlink inside a layer
+    f"{layer}/usr/via/a.so",                      # a symlinked directory on the way
     f"{layer}/usr/lib",                           # a directory
+    f"{layer}/usr/lib/fifo.so",                   # a FIFO, without blocking
 )))
 PY
 )
-expect 'only regular layer files, no escapes or symlinks' "${checks}" 'True False False False False'
+expect 'only regular layer files, no escapes, symlinks or FIFOs' "${checks}" 'True False False False False False False'
+rm -rf "${layer}/usr/via" "${layer}/usr/real" "${layer}/usr/lib/fifo.so"
 printf '%s a b\n' /etc/hostname > "${WORK}/outside.mismatch"
-expect 'paths outside the layers are skipped' "$(python3 /usr/local/bin/cg-pfn.py "${WORK}/outside.mismatch" "${WORK}/pages.log" test)" pages=0
+expect 'paths outside the layers are skipped' \
+    "$(python3 /usr/local/bin/cg-pfn.py "${WORK}/outside.mismatch" "${WORK}/pages.log" test)" 'pages=0 skipped=0'
+printf '%s\n' '2026-11-10T04:30:00+0000 check pfn=unknown phys=unknown bits=3 variants=1/5 page=0 /x' > "${WORK}/unknown.log"
+expect 'an unknown page is no defective page' "$(logged_pfns "${WORK}/unknown.log" | wc -l | tr -d ' ')" 0
 ln -s "${WORK}/outside.mismatch" "${WORK}/link.mismatch"
 expect 'a symlinked mismatch file is refused' \
     "$(python3 /usr/local/bin/cg-pfn.py "${WORK}/link.mismatch" "${WORK}/pages.log" test 2>&1 | grep -c 'symbolic links')" 1
@@ -294,6 +367,49 @@ CG_FIXTURES="${WORK}" PATH="/tests/stubs:${PATH}" bash -c '
     source /usr/local/lib/crash-guard/entities.sh 2> /dev/null
     crash_status 24 /nonexistent' > "${WORK}/quiet.json" 2> "${WORK}/quiet.log"
 expect 'no crash, no problem' "$(jq -c '[.boot, (.programs | length), (.home_assistant | length), .problem]' "${WORK}/quiet.json")" '[0,0,0,false]'
+expect 'the count of program crashes in the window' "$(jq -r .programs_count <<< "${status}")" 2
+expect 'the configuration link of Home Assistant 2026.11' \
+    "$(first "${DEVICE}" | jq -r .device.configuration_url)" homeassistant://config/app/c3edd230_crash_guard/info
+expect 'the newest coredump cursor' "$(PATH="/tests/stubs:${PATH}" bash -c '
+    source /usr/local/lib/crash-guard/entities.sh 2> /dev/null; crash_cursor')" 's=fixture;i=3'
+
+echo '# MQTT credentials (entities.sh)'
+mkdir -m 700 "${WORK}/secrets"
+out=$(bash -c '
+    source /usr/local/lib/crash-guard/entities.sh 2> /dev/null
+    cg_credentials "$1" app "pass with spaces"
+    echo "${XDG_CONFIG_HOME}"' _ "${WORK}/secrets")
+expect 'the options files are used' "${out}" "${WORK}/secrets"
+expect 'one option per line, the value the rest of it' "$(tr '\n' '|' < "${WORK}/secrets/mosquitto_sub")" '-u app|-P pass with spaces|'
+expect 'the same for mosquitto_pub' "$(cmp -s "${WORK}/secrets/mosquitto_pub" "${WORK}/secrets/mosquitto_sub" && echo same)" same
+expect 'readable by root only' "$(stat -c %a "${WORK}/secrets/mosquitto_pub")" 600
+
+echo '# Availability held with a last will (entities.sh)'
+: > "${PUBLISHED}"
+rm -f "${PUBLISHED}.sub"
+PATH="/tests/stubs:${PATH}" CG_HOLD_SETTLE=1 CG_HOLD_RETRY=1 HOSTNAME=test bash -c '
+    declare -a MQ=(-h broker)
+    source /usr/local/lib/crash-guard/entities.sh 2> /dev/null
+    cg_hold_availability' &
+holder=$!
+# The stub connection is "sleep 600"; there is no pkill in the image
+drop_connection() {
+    local p
+    for p in /proc/[0-9]*; do
+        [[ "$(tr '\0' ' ' < "${p}/cmdline" 2> /dev/null)" == 'sleep 600 ' ]] && kill "${p#/proc/}"
+    done
+}
+online() { grep -c "^crash_guard/availability	online$" "${PUBLISHED}"; }
+for _ in $(seq 1 50); do (( $(online) > 0 )) && break; sleep 0.2; done
+expect 'connects with the last will' "$(grep -c -- '--will-payload offline --will-retain' "${PUBLISHED}.sub")" 1
+expect 'and says online' "$(online)" 1
+# The connection drops, as when the broker restarts: the broker sends the will
+drop_connection
+for _ in $(seq 1 50); do (( $(online) > 1 )) && break; sleep 0.2; done
+expect 'connects again and says online again' "$(online)|$(wc -l < "${PUBLISHED}.sub" | tr -d ' ')" '2|2'
+kill -TERM "${holder}"
+wait "${holder}" 2> /dev/null
+drop_connection
 
 echo '# Entities while the MQTT broker is away'
 : > "${PUBLISHED}"; rm -f "${PUBLISHED}.calls"
