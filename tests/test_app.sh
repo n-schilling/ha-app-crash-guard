@@ -392,20 +392,21 @@ PATH="/tests/stubs:${PATH}" CG_HOLD_SETTLE=1 CG_HOLD_RETRY=1 HOSTNAME=test bash 
     source /usr/local/lib/crash-guard/entities.sh 2> /dev/null
     cg_hold_availability' &
 holder=$!
-# The stub connection is "sleep 600"; there is no pkill in the image
+# The stub connection is "sleep 600"; there is no pkill in the image (under
+# emulation the command line may start with the emulator)
 drop_connection() {
     local p
     for p in /proc/[0-9]*; do
-        [[ "$(tr '\0' ' ' < "${p}/cmdline" 2> /dev/null)" == 'sleep 600 ' ]] && kill "${p#/proc/}"
+        [[ "$(tr '\0' ' ' < "${p}/cmdline" 2> /dev/null)" == *'sleep 600 ' ]] && kill "${p#/proc/}"
     done
 }
 online() { grep -c "^crash_guard/availability	online$" "${PUBLISHED}"; }
-for _ in $(seq 1 50); do (( $(online) > 0 )) && break; sleep 0.2; done
+for _ in $(seq 1 150); do (( $(online) > 0 )) && break; sleep 0.2; done
 expect 'connects with the last will' "$(grep -c -- '--will-payload offline --will-retain' "${PUBLISHED}.sub")" 1
 expect 'and says online' "$(online)" 1
 # The connection drops, as when the broker restarts: the broker sends the will
 drop_connection
-for _ in $(seq 1 50); do (( $(online) > 1 )) && break; sleep 0.2; done
+for _ in $(seq 1 150); do (( $(online) > 1 )) && break; sleep 0.2; done
 expect 'connects again and says online again' "$(online)|$(wc -l < "${PUBLISHED}.sub" | tr -d ' ')" '2|2'
 kill -TERM "${holder}"
 wait "${holder}" 2> /dev/null

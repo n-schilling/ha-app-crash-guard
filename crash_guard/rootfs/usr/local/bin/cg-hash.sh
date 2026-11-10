@@ -98,11 +98,10 @@ if [[ -n "${copy}" && "${n}" -gt 0 ]]; then
         in_layers "${path}" || continue
         free=$(df -P -B1 -- "${copy}" 2> /dev/null | awk 'NR == 2 { print $4 }')
         [[ "${free}" =~ ^[0-9]+$ ]] && (( free > COPY_FREE )) || break
-        copied=$(( copied + 1 ))
         # Opens every directory on the way without following symlinks; a
-        # file larger than COPY_SIZE is not copied
+        # file larger than COPY_SIZE is not copied and does not count
         python3 /usr/local/bin/cg-copy.py --max "${COPY_SIZE}" "${path}" \
-            "${copy}/$(tr '/' '_' <<< "${path#/mnt/data/docker/overlay2/}")" || true
+            "${copy}/$(tr '/' '_' <<< "${path#/mnt/data/docker/overlay2/}")" && copied=$(( copied + 1 ))
     done < "${out%.sha}.mismatch"
 fi
 echo "hashed=$(wc -l < "${out}") mismatches=${n} changed=${c}"
