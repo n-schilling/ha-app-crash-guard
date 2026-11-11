@@ -19,9 +19,11 @@ Supervisor's (172.30.32.0/23):
 Headless Chromium opens it and checks: the header (name, stamp, refresh,
 settings link with target _top and the right slug; back arrow on a subpage),
 the version line, no console errors and no CSP violations, light, dark and
-phone width, in English and German, and that refresh, the check button,
-an evidence file and the back arrow work through the ingress. Nothing comes
-from a real host, and nothing is sent to one.
+phone width, in English and German, that refresh, the check button,
+an evidence file and the back arrow work through the ingress, and that the
+page takes Home Assistant's language (a stand-in for its frontend in German,
+English and French around the frame) over the browser's, reloading once.
+Nothing comes from a real host, and nothing is sent to one.
 
 Uses the installed Google Chrome when there is one, else Playwright's
 Chromium (`python -m playwright install chromium` once).
@@ -38,7 +40,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Frame, Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts/page"))
@@ -163,7 +165,7 @@ def csp(page: Page) -> list[str]:
     return [v for frame in page.frames for v in (frame.evaluate("window.__csp || []") or [])]
 
 
-def header(page: Page, lang: str, sub: bool, phone: bool, where: str) -> None:
+def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str) -> None:
     t = TEXT[lang]
     h = page.evaluate("""() => {
       const header = document.querySelector("body > header");
@@ -294,6 +296,44 @@ def run_checks(c: Containers, browser, shots: Path | None) -> None:
     check(app.url == c.url("?"), f"frame: the back arrow leads to the start page ({app.url})")
     check(not problems and not csp(page), f"frame: no console errors, no CSP violations ({problems + csp(page)})")
     page.close()
+
+    # The browser asks for English; the page follows Home Assistant's language
+    # (share/ha-app/ha-lang.js): one reload when it changes, none when not
+    print("==> in Home Assistant's language, not the browser's")
+    context = browser.new_context(viewport={"width": 1040, "height": 800}, locale="en-US",
+                                  extra_http_headers={"Accept-Language": "en"})
+    page = context.new_page()
+    problems = watch(page)
+    for ha_lang, lang, expected in (("de", "de", 2), ("de", "de", 1), ("en-GB", "en", 2), ("fr", "en", 2),
+                                    ("fr", "en", 1)):
+        where = f"Home Assistant in {ha_lang}"
+        app, loads = in_home_assistant(page, c, ha_lang)
+        shown = app.evaluate("[document.documentElement.lang, getComputedStyle(document.documentElement).visibility]")
+        check(shown == [lang, "visible"], f"{where}: page in {lang} and shown ({shown})")
+        check(loads == expected, f"{where}: loaded {expected} time(s) ({loads})")
+        header(app, lang, False, False, where)
+        held = [(k["value"], k["path"]) for k in context.cookies() if k["name"] == "ha_lang"]
+        check(held == [(ha_lang.split("-")[0], f"{ingress.PREFIX}/")], f"{where}: cookie for the ingress path ({held})")
+    check(not problems and not csp(page), f"language: no console errors, no CSP violations ({problems + csp(page)})")
+    context.close()
+
+
+def in_home_assistant(page: Page, c: Containers, lang: str) -> tuple[Frame, int]:
+    """Opens the page in a stand-in for Home Assistant's frontend in that language;
+    the app's frame and how often it loaded."""
+    loads: list[str] = []
+
+    def seen(frame: Frame) -> None:
+        if frame.parent_frame is not None and frame.url.startswith(c.url()):
+            loads.append(frame.url)
+
+    page.on("framenavigated", seen)
+    page.goto(f"{c.outer()}?lang={lang}")
+    page.wait_for_timeout(1500)  # room for another reload, which must not come
+    page.remove_listener("framenavigated", seen)
+    app = next(f for f in page.frames if f.parent_frame is not None)
+    app.locator("body > header h1").wait_for()
+    return app, len(loads)
 
 
 def main() -> None:

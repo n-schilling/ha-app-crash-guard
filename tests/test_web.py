@@ -234,6 +234,23 @@ class Server(Fixture):
         self.assertIn(f"script-src 'sha256-{digest}'", csp)
         self.assertIn(f"<script>{w.SCRIPT}</script>", self.get("/")[2])
 
+    def test_language_of_home_assistant(self) -> None:
+        # The cookie of share/ha-app/ha-lang.js decides; the browser's languages only without it
+        self.assertEqual(w.lang_of("a=b; ha_lang=de", "en-US"), "de")
+        self.assertEqual(w.lang_of("ha_lang=en", "de-DE,de"), "en")
+        self.assertEqual(w.lang_of("ha_lang=fr", "de-DE,de"), "en")
+        self.assertEqual(w.lang_of(None, "de-DE,de;q=0.9,en;q=0.8"), "de")
+        self.assertEqual(w.lang_of("other=1", "fr,en;q=0.5,de;q=0.4"), "en")
+        self.assertIn('<html lang="de">', self.get("/", headers={"Cookie": "ha_lang=de",
+                                                               "Accept-Language": "en"})[2])
+        self.assertIn('<html lang="en">', self.get("/", headers={"Cookie": "ha_lang=en",
+                                                               "Accept-Language": "de"})[2])
+
+    def test_shared_language_script_first(self) -> None:
+        shared = w.SHARED_SCRIPT_FILE.read_text(encoding="utf-8")
+        self.assertIn("ha_lang", shared)
+        self.assertTrue(w.SCRIPT.startswith(shared))
+
     def test_evidence_as_plain_text(self) -> None:
         code, headers, body = self.get(f"/?case={CRASH}&file=container.log")
         self.assertEqual((code, headers["Content-Type"]), (200, "text/plain; charset=utf-8"))

@@ -5,6 +5,10 @@ network 172.30.32.0/23 and the only client the page answers:
 
     /                                   a page with the app in an iframe,
                                         as Home Assistant's panel shows it
+    /?lang=de                           the same with a stand-in for the
+                                        frontend's <home-assistant> element,
+                                        whose hass names that language (and
+                                        light mode), as the page reads it
     /api/hassio_ingress/<TOKEN>/...     passed on to http://app:8099/...
                                         without the prefix, like the Supervisor
 
@@ -14,7 +18,9 @@ Standard library only; it runs with the python3 of the app's image.
 from __future__ import annotations
 
 import http.client
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 TOKEN = "Zm9vYmFyLWRlbW8tdG9rZW4"
 PREFIX = f"/api/hassio_ingress/{TOKEN}"
@@ -25,15 +31,27 @@ HOP = {"connection", "keep-alive", "transfer-encoding", "upgrade", "host", "cont
        "proxy-connection", "te", "trailer"}
 OUTER = f"""<!doctype html><html><head><meta charset="utf-8"><title>Home Assistant</title><link rel="icon" href="data:,">
 <style>html, body {{ margin: 0; height: 100%; }} iframe {{ border: 0; width: 100%; height: 100%; display: block; }}</style>
-</head><body><iframe src="{PREFIX}/" title="App"></iframe></body></html>""".encode()
+</head><body>HASS<iframe src="{PREFIX}/" title="App"></iframe></body></html>"""
+# Home Assistant's frontend as far as the page reads it: the user's language
+HASS = """<home-assistant></home-assistant><script>document.querySelector("home-assistant").hass =
+{ language: "LANG", locale: { language: "LANG" }, themes: { darkMode: false } };</script>"""
+LANG = re.compile(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?")
+
+
+def outer(query: str) -> bytes:
+    """The page around the iframe; with ?lang=xx as Home Assistant in that language."""
+    lang = (parse_qs(query).get("lang") or [""])[0]
+    hass = HASS.replace("LANG", lang) if LANG.fullmatch(lang) else ""
+    return OUTER.replace("HASS", hass).encode()
 
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def _proxy(self) -> None:
-        if self.path in ("/", ""):
-            self._reply(200, [("Content-Type", "text/html; charset=utf-8")], OUTER)
+        path, _, query = self.path.partition("?")
+        if path in ("/", ""):
+            self._reply(200, [("Content-Type", "text/html; charset=utf-8")], outer(query))
             return
         if self.path != PREFIX and not self.path.startswith(PREFIX + "/") and not self.path.startswith(PREFIX + "?"):
             self._reply(404, [("Content-Type", "text/plain")], b"not found")

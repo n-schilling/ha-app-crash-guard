@@ -12,7 +12,7 @@ A Home Assistant app for everything about crashes on a Home Assistant OS host: i
 
 ## Screenshots
 
-The page, made up for these pictures. It looks like Home Assistant's settings, takes over the theme in use and shows the app's version at the bottom.
+The page, made up for these pictures. It looks like Home Assistant's settings, takes over the theme in use, speaks the language of Home Assistant's interface (German or English) and shows the app's version at the bottom.
 
 <img src="docs/screenshots/overview.png" alt="Status of memory lock, page cache and crashes, the program crashes and the memory lock with its defective pages, the cases, the event log and the cache checks" width="700">
 
@@ -80,7 +80,7 @@ See [the documentation](crash_guard/DOCS.md) for the options, the page, the sens
 
 ## Development
 
-The guard service is Bash in [`crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run`](crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run) with its libraries in [`crash_guard/rootfs/usr/local/lib/crash-guard`](crash_guard/rootfs/usr/local/lib/crash-guard); the helpers and the page are Python in [`crash_guard/rootfs/usr/local/bin`](crash_guard/rootfs/usr/local/bin). The page's look comes from the stylesheet shared by these apps, [`ha.css`](crash_guard/rootfs/usr/local/share/ha-app/ha.css), which stays identical in every app.
+The guard service is Bash in [`crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run`](crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run) with its libraries in [`crash_guard/rootfs/usr/local/lib/crash-guard`](crash_guard/rootfs/usr/local/lib/crash-guard); the helpers and the page are Python in [`crash_guard/rootfs/usr/local/bin`](crash_guard/rootfs/usr/local/bin). The page's look comes from the stylesheet shared by these apps, [`ha.css`](crash_guard/rootfs/usr/local/share/ha-app/ha.css), and its language from the script shared by them, [`ha-lang.js`](crash_guard/rootfs/usr/local/share/ha-app/ha-lang.js); both stay identical in every app.
 
 ```bash
 scripts/check.sh
@@ -88,7 +88,7 @@ scripts/check.sh
 
 `scripts/check.sh` runs what CI runs (changelog, shellcheck, ruff, the image built for this machine with the app, guard and page tests inside it, the page of that image in a browser, and the test against a real Mosquitto broker; `--no-docker` skips what needs Docker). The page check and the screenshots are one script, `scripts/screenshots.py` (see its header for the setup): it starts the built image with made-up data in a throwaway container behind a stand-in for Home Assistant's ingress, checks the page with headless Chromium and, without `--check`, takes the pictures.
 
-Releases: work on `dev`, raise `version` in `crash_guard/config.yaml` and add its section to the changelog; when CI is green on `main`, the release workflow tags the version and publishes the release with that section.
+Releases: work on `dev`, raise `version` in `crash_guard/config.yaml` and add its section to the changelog. CI runs on `dev` (amd64 and aarch64 each on a runner of its own kind); once it is green, push that commit to `main`. CI does not run again there: the release workflow checks that CI passed for the commit, then tags the version and publishes the release with that section.
 
 ## Support
 

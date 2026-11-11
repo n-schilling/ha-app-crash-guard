@@ -129,6 +129,8 @@ Open it with **Open web UI** on the app's page under **Settings → Apps**, or t
 
 At the bottom the page shows the app's name and version, for example `Crash Guard 2.2.0`.
 
+The page speaks the language of your Home Assistant interface (your profile's language): German, else English. It keeps that language in a cookie for this page only; after you change the language in your profile, the page follows the next time you open it, reloading once.
+
 The evidence of a crash can hold secrets, as Home Assistant's own log can.
 
 The app keeps everything in its private data folder, which is part of its backups: its logs (`events.log`, `drops.log`, `badpages.log`), the state for the page (`status.json`), the reference hashes and the newest `cases_to_keep` cases. A case keeps the lists of the files that differed and copies of them, not the full hash lists of every file.

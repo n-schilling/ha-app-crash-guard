@@ -184,6 +184,18 @@ def shared_style() -> str:
 
 SHARED_STYLE = shared_style()
 
+# Home Assistant's language for the page (cookie ha_lang), shared like the
+# stylesheet; it runs first, in the page's one script
+SHARED_SCRIPT_FILE = SHARED_STYLE_FILE.with_name("ha-lang.js")
+
+
+def shared_script() -> str:
+    try:
+        return SHARED_SCRIPT_FILE.read_text(encoding="utf-8")
+    except OSError:
+        LOGGER.warning("Script %s missing", SHARED_SCRIPT_FILE)
+        return ""
+
 # What only this page needs, after the shared stylesheet
 STYLE = """
 header > .icon-button:first-child { margin-left: -12px; }
@@ -259,6 +271,7 @@ SCRIPT = """(() => {
     }
   }, true);
 })();""".replace("NAMES", json.dumps(THEME_VARS))
+SCRIPT = shared_script() + SCRIPT
 
 # The one script of the page, allowed by its hash: should some text ever slip
 # through unescaped, a script in it would still not run
@@ -451,9 +464,18 @@ def checks(data: Path) -> list[dict]:
 
 
 # --- Formatting --------------------------------------------------------------------------------
-def lang_of(header: str | None) -> str:
-    """German if the browser puts German before English, else English."""
-    for part in (header or "").split(","):
+def lang_of(cookie: str | None, accept: str | None = None) -> str:
+    """German or English, as Home Assistant's interface shows it.
+
+    The page script keeps Home Assistant's language in the cookie ha_lang
+    (share/ha-app/ha-lang.js): German for "de", English for everything else.
+    Only without that cookie, German if the browser puts German before English.
+    """
+    for part in (cookie or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == "ha_lang":
+            return "de" if value.strip().lower() == "de" else "en"
+    for part in (accept or "").split(","):
         code = part.split(";")[0].strip().lower()
         if code.startswith("de"):
             return "de"
@@ -826,7 +848,7 @@ def handler(data: Path, slug: str | None, allowed: set[str], version: str | None
             if self._refused():
                 return
             query = parse_qs(self.path.partition("?")[2])
-            lang = lang_of(self.headers.get("Accept-Language"))
+            lang = lang_of(self.headers.get("Cookie"), self.headers.get("Accept-Language"))
             file = (query.get("file") or [""])[0]
             if file:
                 text = evidence_text(data, (query.get("case") or [""])[0], file, lang)
