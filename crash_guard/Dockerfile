@@ -16,7 +16,8 @@ RUN \
         mosquitto-clients \
         python3 \
         systemd \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin cgweb
 
 COPY rootfs /
 

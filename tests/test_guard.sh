@@ -151,18 +151,19 @@ expect 'exit after a stop only logged' "$(events_log | grep -c 'after an intende
 echo '# Check requested on the page'
 drops_before=$(requests "${drop}" | wc -l | tr -d ' ')
 # The fake helper hashes nothing: an empty reference, the request is skipped
-touch /data/crash_guard/check.request
+mkdir -p /data/crash_guard/web
+touch /data/crash_guard/web/check.request
 wait_for 'events_log | grep -q "requested on the page skipped"' 15
 expect 'without a reference: skipped' "$(events_log | grep -c 'skipped: no reference')" 1
 for ref in /data/crash_guard/ref/*.sha; do echo "$(printf '0%.0s' {1..64})  /x" > "${ref}"; done
-touch /data/crash_guard/check.request
+touch /data/crash_guard/web/check.request
 wait_for 'events_log | grep -q "Check (no drop)"' 30
-expect 'request taken' "$([[ -e /data/crash_guard/check.request ]] && echo left || echo taken)" taken
+expect 'request taken' "$([[ -e /data/crash_guard/web/check.request ]] && echo left || echo taken)" taken
 expect 'checked on request' "$(events_log | grep -c 'Check requested on the page$')" 1
 expect 'without dropping the cache' "$(requests "${drop}" | wc -l | tr -d ' ')" "${drops_before}"
 expect 'checked once' "$(events_log | grep -c 'Check (no drop)')" 1
 expect 'no running marker left' "$([[ -e /data/crash_guard/check.running ]] && echo left || echo none)" none
-touch /data/crash_guard/check.request
+touch /data/crash_guard/web/check.request
 wait_for 'events_log | grep -q "requested on the page ignored"' 15
 expect 'a second request within 10 minutes is ignored' "$(events_log | grep -c 'Check (no drop)')" 1
 
@@ -176,7 +177,7 @@ touch "${FAKE}/hash_fails"
 corrupted_before=$(events_log | grep -c 'CORRUPTED')
 start_guard
 wait_for 'grep -c "Crash Guard active" "${WORK}/log" | grep -q 2' 30
-touch /data/crash_guard/check.request
+touch /data/crash_guard/web/check.request
 wait_for 'events_log | grep -q "Check (no drop) failed"' 30
 expect 'the failure is logged with the answer' "$(events_log | grep -c 'Check (no drop) failed: sha256sum: read error')" 1
 expect 'as an unknown result' "$(tail -1 /data/crash_guard/drops.log | cut -d' ' -f2-)" 'cache=? fresh=- (check failed)'

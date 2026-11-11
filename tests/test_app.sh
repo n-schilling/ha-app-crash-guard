@@ -426,6 +426,37 @@ expect 'sent once the broker is back' "$(sed -n 2p "${WORK}/away.out")|$(last cr
 expect 'no raw errors' "$(cat "${WORK}/away.log")" ''
 rm -f "${PUBLISHED}.calls"
 
+echo '# Web page without root (web/run)'
+mkdir -p "${WORK}/bin" /data/crash_guard/cases/old /data/crash_guard/ref
+printf 'log' > /data/crash_guard/cases/old/home-assistant.log.fault
+chmod 600 /data/crash_guard/cases/old/home-assistant.log.fault
+touch /data/crash_guard/check.requested /data/crash_guard/check.request /data/crash_guard/status.json
+# s6-setuidgid records how the page would start
+cat > "${WORK}/bin/s6-setuidgid" <<'STUB'
+#!/bin/bash
+printf '%s|%s\n' "$*" "${SUPERVISOR_TOKEN-none}" > "${STARTED}"
+STUB
+chmod +x "${WORK}/bin/s6-setuidgid"
+SUPERVISOR_TOKEN=secret STARTED="${WORK}/started" PATH="${WORK}/bin:${PATH}" bash -c '
+    source /usr/lib/bashio/bashio.sh
+    source "$0"
+' /etc/s6-overlay/s6-rc.d/web/run > "${WORK}/web.log" 2>&1
+expect 'starts the page as cgweb without the Supervisor token' "$(cat "${WORK}/started" 2>/dev/null)" \
+    'cgweb python3 /usr/local/lib/crash_guard_web.py|none'
+expect 'folders readable for the group only, passing it on' \
+    "$(stat -c '%G %a' /data/crash_guard /data/crash_guard/cases/old /data/crash_guard/ref | tr '\n' '|')" \
+    'cgweb 2750|cgweb 2750|cgweb 2750|'
+expect 'files readable for the group, not for others' \
+    "$(stat -c '%U %G %a' /data/crash_guard/status.json /data/crash_guard/cases/old/home-assistant.log.fault | tr '\n' '|')" \
+    'root cgweb 640|root cgweb 640|'
+expect 'the page writes to its own folder only' "$(stat -c '%U %G %a' /data/crash_guard/web)" 'cgweb cgweb 2750'
+expect 'requests of 2.2.0 removed' "$(find /data/crash_guard -maxdepth 1 -name 'check.*' | wc -l | tr -d ' ')" 0
+expect 'the page user cannot reach the Docker socket' "$(id -Gn cgweb)" cgweb
+(umask 027; mkdir -p /data/crash_guard/cases/new; printf x > /data/crash_guard/cases/new/kernel.txt)
+expect 'what the guard writes later gets the group' "$(stat -c '%G %a' /data/crash_guard/cases/new/kernel.txt)" 'cgweb 640'
+expect 'the copy tool writes for the group' "$(python3 /usr/local/bin/cg-copy.py /etc/hostname "${WORK}/copied" && stat -c '%a' "${WORK}/copied")" 640
+rm -rf /data/crash_guard
+
 rm -rf "${L}"
 if (( FAILED )); then
     exit 1

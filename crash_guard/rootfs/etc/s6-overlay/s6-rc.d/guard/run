@@ -26,6 +26,10 @@ set +o errexit
 # Everything the app writes or acts on (logs, state, layer list, reference
 # hashes, cases) stays in its private /data; the web page reads it from there
 readonly PRIV=/data/crash_guard
+# The web page runs as user cgweb and reads the data through its group: the
+# folders pass the group on (web/run sets them up), the umask keeps everyone
+# else out
+umask 027
 readonly LAYERS="${PRIV}/layers.txt"
 # Working folder of the current case; kept when worth keeping
 readonly WORK="${PRIV}/tmp/case"
@@ -358,7 +362,7 @@ scheduled_check() {
 # drop_on_schedule says, and at most one per MANUAL_GAP seconds - the page
 # enforces that too, this is the guard's own limit. RUNNING tells the page that
 # the check is under way.
-readonly REQUEST="${PRIV}/check.request" RUNNING="${PRIV}/check.running" MANUAL_GAP=600
+readonly REQUEST="${PRIV}/web/check.request" RUNNING="${PRIV}/check.running" MANUAL_GAP=600
 LAST_MANUAL=0
 
 requested_check() {

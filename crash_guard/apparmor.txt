@@ -1,0 +1,77 @@
+abi <abi/3.0>,
+#include <tunables/global>
+
+# Watches Home Assistant through the Docker socket, the host journal and the
+# Supervisor; hashing, dropping the cache and the RAM lock run in helper
+# containers that Docker starts with their own profiles. The guard runs as
+# root, the web page as user cgweb. It reads widely (logs, its data, the
+# configuration), but writes only its data and runtime files. Docker's own
+# default profile, under which the app ran before, is kept as the outer
+# bound. Measured on Home Assistant OS in complain mode before it enforced.
+profile crash_guard flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # s6-overlay, the web page's user and folder
+  capability chown,
+  capability dac_override,
+  capability dac_read_search,
+  capability fowner,
+  capability fsetid,
+  capability kill,
+  capability setgid,
+  capability setuid,
+
+  network inet dgram,
+  network inet6 dgram,
+  network inet stream,
+  network inet6 stream,
+  network unix,
+  network netlink raw,
+
+  # s6 stops its services; the Supervisor stops the container
+  signal (send, receive),
+  ptrace (read, readby),
+
+  # Reads its image, its data, the configuration, the journal
+  /** r,
+
+  # s6-overlay
+  /init rix,
+  /package/** ix,
+  /command/** ix,
+  /etc/s6-overlay/** ix,
+  /run/** rwk,
+
+  # Programs of the image
+  /bin/** ix,
+  /sbin/** ix,
+  /usr/bin/** ix,
+  /usr/sbin/** ix,
+  /usr/local/bin/** ix,
+  /usr/local/lib/** ix,
+  /usr/lib/** m,
+  /lib/** m,
+
+  # bashio, temporary files
+  /tmp/** rwk,
+  /var/tmp/** rwk,
+
+  # Its data: cases, references, state; the Docker socket
+  /data/** rwk,
+  /run/docker.sock rw,
+  /dev/null rw,
+  /dev/tty rw,
+  /dev/pts/* rw,
+
+  # From Docker's default profile
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9/]*}/** w,
+  deny @{PROC}/sys/** w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny mount,
+  deny /sys/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+}

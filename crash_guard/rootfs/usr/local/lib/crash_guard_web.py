@@ -56,7 +56,9 @@ DATA = Path("/data/crash_guard")
 STATUS = "status.json"
 # A check requested on this page: REQUEST is left for the guard service, which
 # removes it when it takes the request and keeps RUNNING while it checks;
-# REQUESTED holds the time of the last request
+# REQUESTED holds the time of the last request. The page runs as a user of its
+# own and writes only to REQUESTS, its folder in the data; RUNNING is the guard's
+REQUESTS = "web"
 REQUEST = "check.request"
 RUNNING = "check.running"
 REQUESTED = "check.requested"
@@ -334,7 +336,7 @@ def present(data: Path, name: str) -> bool:
 
 
 def last_request(data: Path) -> float:
-    read = read_text(data, REQUESTED, 64)
+    read = read_text(data / REQUESTS, REQUESTED, 64)
     try:
         return float(read[0].strip()) if read else 0.0
     except ValueError:
@@ -345,7 +347,7 @@ def check_state(data: Path, now: float) -> tuple[str, float]:
     """running, queued, wait (with the time a request is possible again) or ready."""
     if present(data, RUNNING):
         return "running", 0.0
-    if present(data, REQUEST):
+    if present(data / REQUESTS, REQUEST):
         return "queued", 0.0
     again = last_request(data) + MANUAL_GAP
     if now < again:
@@ -361,16 +363,16 @@ def request_check(data: Path, now: float) -> int:
             return 429
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         try:
-            os.close(os.open(data / REQUEST, flags, 0o644))
+            os.close(os.open(data / REQUESTS / REQUEST, flags, 0o640))
         except FileExistsError:
             return 429
-        stamp = data / f"{REQUESTED}.new"
+        stamp = data / REQUESTS / f"{REQUESTED}.new"
         try:
             stamp.unlink(missing_ok=True)
-            fd = os.open(stamp, flags, 0o644)
+            fd = os.open(stamp, flags, 0o640)
             with os.fdopen(fd, "w") as out:
                 out.write(f"{now:.0f}\n")
-            os.replace(stamp, data / REQUESTED)
+            os.replace(stamp, data / REQUESTS / REQUESTED)
         except OSError:
             LOGGER.warning("Time of the request could not be kept")
         LOGGER.info("Cache check requested on the page")

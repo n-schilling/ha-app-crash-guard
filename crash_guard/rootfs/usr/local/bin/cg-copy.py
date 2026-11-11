@@ -68,7 +68,7 @@ def main() -> int:
         if args.tail is not None and info.st_size > args.tail:
             src.seek(info.st_size - args.tail)
             left = args.tail
-        out = os.open(args.target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        out = os.open(args.target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
         with os.fdopen(out, "wb") as dst:
             # Never more than the size seen at the start, even if the file grows
             while left > 0 and (chunk := src.read(min(left, 1 << 20))):

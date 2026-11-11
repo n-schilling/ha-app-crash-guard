@@ -44,6 +44,7 @@ class Fixture(unittest.TestCase):
         crash = self.data / "cases" / CRASH
         (crash / "cache_files").mkdir(parents=True)
         (self.data / "cases" / CHECK).mkdir()
+        (self.data / w.REQUESTS).mkdir()
         (self.data / "status.json").write_text(json.dumps(STATUS))
         (self.data / "events.log").write_text(
             f"2026-10-01T12:01:00+02:00 Crash handled: exit 139, corrupted in cache 1, afterwards 0, "
@@ -74,11 +75,11 @@ class Overview(Fixture):
     def test_check_button(self) -> None:
         self.assertRegex(self.page(), r'<button class="button" id="check-now"[^>]*>Check now</button>')
         self.assertNotRegex(self.page(), r'id="check-now"[^>]* disabled')
-        (self.data / w.REQUESTED).write_text(f"{NOW - 60:.0f}\n")
+        (self.data / w.REQUESTS / w.REQUESTED).write_text(f"{NOW - 60:.0f}\n")
         page = self.page(lang="de")
         self.assertIn("Wieder möglich um ", page)
         self.assertRegex(page, r'id="check-now"[^>]* disabled>Jetzt prüfen')
-        (self.data / w.REQUEST).touch()
+        (self.data / w.REQUESTS / w.REQUEST).touch()
         self.assertIn("Check requested, starts within a few seconds", self.page())
         (self.data / w.RUNNING).touch()
         self.assertIn("Check running", self.page())
@@ -257,24 +258,24 @@ class Server(Fixture):
     def test_check_request_needs_the_header(self) -> None:
         self.assertEqual(self.get("/", "POST")[0], 403)
         self.assertEqual(self.get("/", "POST", {"X-Crash-Guard": "other"})[0], 403)
-        self.assertFalse((self.data / w.REQUEST).exists())
+        self.assertFalse((self.data / w.REQUESTS / w.REQUEST).exists())
 
     def test_check_request_once_per_gap(self) -> None:
         check = {"X-Crash-Guard": "check"}
         self.assertEqual(self.get("/", "POST", check)[0], 202)
-        self.assertTrue((self.data / w.REQUEST).is_file())
+        self.assertTrue((self.data / w.REQUESTS / w.REQUEST).is_file())
         # still waiting for the guard service
         self.assertEqual(self.get("/", "POST", check)[0], 429)
         # taken by the guard service, but within the gap
-        (self.data / w.REQUEST).unlink()
+        (self.data / w.REQUESTS / w.REQUEST).unlink()
         self.assertEqual(self.get("/", "POST", check)[0], 429)
-        self.assertFalse((self.data / w.REQUEST).exists())
-        (self.data / w.REQUESTED).write_text(f"{w.time.time() - w.MANUAL_GAP - 1:.0f}\n")
+        self.assertFalse((self.data / w.REQUESTS / w.REQUEST).exists())
+        (self.data / w.REQUESTS / w.REQUESTED).write_text(f"{w.time.time() - w.MANUAL_GAP - 1:.0f}\n")
         self.assertEqual(self.get("/", "POST", check)[0], 202)
 
     def test_check_request_never_follows_a_symlink(self) -> None:
         target = self.root / "elsewhere"
-        (self.data / w.REQUEST).symlink_to(target)
+        (self.data / w.REQUESTS / w.REQUEST).symlink_to(target)
         self.assertEqual(self.get("/", "POST", {"X-Crash-Guard": "check"})[0], 429)
         self.assertFalse(target.exists())
 
