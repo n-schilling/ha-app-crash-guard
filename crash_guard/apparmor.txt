@@ -33,6 +33,7 @@ profile crash_guard flags=(attach_disconnected,mediate_deleted) {
   ptrace (read, readby),
 
   # Reads its image, its data, the configuration, the journal
+  / r,
   /** r,
 
   # s6-overlay
