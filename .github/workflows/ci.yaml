@@ -97,6 +97,30 @@ jobs:
           -v "${PWD}/tests:/tests:ro" --entrypoint python3 crash-guard:test
           -m unittest discover -v -s /tests -p 'test_*.py'
 
+  page:
+    name: Page
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Build
+        run: |
+          version=$(yq -r '.version' crash_guard/config.yaml)
+          docker build --build-arg "BUILD_VERSION=${version}" -t crash-guard:test crash_guard
+      - name: Playwright
+        run: |
+          pip install playwright==1.65.0
+          python -m playwright install --with-deps chromium
+      # The built image with made-up data behind a stand-in for the ingress,
+      # in throwaway containers; headless Chromium as Home Assistant shows it
+      - name: Check the page
+        run: python scripts/screenshots.py --check --image crash-guard:test
+
   broker:
     name: Against a real MQTT broker
     runs-on: ubuntu-latest

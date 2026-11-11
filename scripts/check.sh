@@ -1,19 +1,21 @@
 #!/bin/bash
 # Runs locally what the CI workflow runs, so a push only confirms what already
 # passed here: the changelog check, shellcheck, ruff, the image build with the
-# tests inside it (app, guard service, web page) and the test against a real
-# Mosquitto broker. Keep the steps in step with .github/workflows/ci.yaml.
+# tests inside it (app, guard service, web page), the page of that image in a
+# browser (Page) and the test against a real Mosquitto broker. Keep the steps in step with .github/workflows/ci.yaml.
 #
 # Usage: scripts/check.sh [--no-docker]
 #
 # The image is built for the architecture of this machine; CI builds and tests
 # both (amd64, aarch64). shellcheck and ruff come from PATH when they are
 # there, else shellcheck runs in its container and ruff through uvx. The app
-# configuration linter (frenck/action-addon-linter) runs in CI only.
+# configuration linter (frenck/action-addon-linter) runs in CI only. Page needs
+# uv (Playwright comes through it) and Google Chrome or Playwright's Chromium.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
 readonly RUFF_VERSION=0.17.3
+readonly PLAYWRIGHT_VERSION=1.65.0
 readonly SHELLCHECK_IMAGE=koalaman/shellcheck:v0.11.0
 readonly BROKER_IMAGE=eclipse-mosquitto:2.1.2-alpine@sha256:75d6662dee52c947dc9dd9c29f1d8d7ffef78ddaf38001caa09755681e8bbc98
 readonly SHELL_SCRIPTS=(
@@ -92,6 +94,12 @@ else
         "${tests[@]}" --entrypoint bash crash-guard:test /tests/test_guard.sh
     run "Test the web page" docker run --rm --network none "${tests[@]}" --entrypoint python3 crash-guard:test \
         -m unittest discover -s /tests -p 'test_*.py'
+    if command -v uv > /dev/null; then
+        run "Page" uv run --no-project --with "playwright==$PLAYWRIGHT_VERSION" \
+            python scripts/screenshots.py --check --image crash-guard:test
+    else
+        skipped+=("Page (no uv)")
+    fi
 
     net="crash-guard-check-$$"
     docker network create "$net" > /dev/null

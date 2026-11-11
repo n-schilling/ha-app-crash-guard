@@ -2,6 +2,13 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-11-11
+
+### Added
+
+- A CI job `Page`, also in `scripts/check.sh`: the built image runs with made-up data in a throwaway container behind a stand-in for Home Assistant's ingress, and headless Chromium checks the page as Home Assistant shows it: the header (name, time stamp, refresh, settings), the version line, no console errors or blocked content, light, dark and phone width, English and German, and that refresh, the check button, the evidence files and the back arrow work through the ingress
+- `scripts/screenshots.py` takes the screenshots from that same running image instead of rendering the page on its own
+
 ## [2.2.1] - 2026-11-11
 
 ### Security

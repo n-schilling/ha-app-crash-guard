@@ -86,7 +86,7 @@ The guard service is Bash in [`crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/r
 scripts/check.sh
 ```
 
-`scripts/check.sh` runs what CI runs (changelog, shellcheck, ruff, the image built for this machine with the app, guard and page tests inside it, and the test against a real Mosquitto broker; `--no-docker` skips what needs Docker). The screenshots come from `scripts/screenshots.py` (see its header for the setup): it renders the page from made-up data and draws it with headless Chromium.
+`scripts/check.sh` runs what CI runs (changelog, shellcheck, ruff, the image built for this machine with the app, guard and page tests inside it, the page of that image in a browser, and the test against a real Mosquitto broker; `--no-docker` skips what needs Docker). The page check and the screenshots are one script, `scripts/screenshots.py` (see its header for the setup): it starts the built image with made-up data in a throwaway container behind a stand-in for Home Assistant's ingress, checks the page with headless Chromium and, without `--check`, takes the pictures.
 
 Releases: work on `dev`, raise `version` in `crash_guard/config.yaml` and add its section to the changelog; when CI is green on `main`, the release workflow tags the version and publishes the release with that section.
 
