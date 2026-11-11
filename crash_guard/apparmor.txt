@@ -41,6 +41,10 @@ profile crash_guard flags=(attach_disconnected,mediate_deleted) {
   /command/** ix,
   /etc/s6-overlay/** ix,
   /run/** rwk,
+  # s6-overlay runs the scripts it copied to /run at the start
+  /run/s6/** rix,
+  /run/s6-rc*/** rix,
+  /run/service/** rix,
 
   # Programs of the image
   /bin/** ix,
