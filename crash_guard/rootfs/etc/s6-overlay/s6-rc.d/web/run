@@ -13,10 +13,12 @@ readonly USER_NAME=cgweb
 # writes (setgid), and the guard's umask 027 keeps everyone else out. Up to
 # 2.2.0 everything was readable for all, and the page wrote its requests to
 # the data folder itself.
+# The page's own folder is left out: root never walks into what cgweb can
+# write, and skips files with a second name (a hard link to another file)
 mkdir -p "${PRIV}"
-chgrp -hR "${USER_NAME}" "${PRIV}"
-find "${PRIV}" -type d -exec chmod 2750 {} +
-find "${PRIV}" -type f -exec chmod g+r,g-wx,o-rwx {} +
+find "${PRIV}" -path "${PRIV}/web" -prune -o \( -type d -o -type f -links 1 \) -exec chgrp "${USER_NAME}" {} +
+find "${PRIV}" -path "${PRIV}/web" -prune -o -type d -exec chmod 2750 {} +
+find "${PRIV}" -path "${PRIV}/web" -prune -o -type f -links 1 -exec chmod g+r,g-wx,o-rwx {} +
 install -d -o "${USER_NAME}" -g "${USER_NAME}" -m 0750 "${PRIV}/web"
 rm -f "${PRIV}/check.request" "${PRIV}/check.requested"
 

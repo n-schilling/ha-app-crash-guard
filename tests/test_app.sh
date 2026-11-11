@@ -455,6 +455,14 @@ expect 'the page user cannot reach the Docker socket' "$(id -Gn cgweb)" cgweb
 (umask 027; mkdir -p /data/crash_guard/cases/new; printf x > /data/crash_guard/cases/new/kernel.txt)
 expect 'what the guard writes later gets the group' "$(stat -c '%G %a' /data/crash_guard/cases/new/kernel.txt)" 'cgweb 640'
 expect 'the copy tool writes for the group' "$(python3 /usr/local/bin/cg-copy.py /etc/hostname "${WORK}/copied" && stat -c '%a' "${WORK}/copied")" 640
+echo '# A second start does not walk into the folder of the page'
+touch /data/crash_guard/secret; chmod 600 /data/crash_guard/secret; chgrp root /data/crash_guard/secret
+ln /data/crash_guard/secret /data/crash_guard/web/link
+SUPERVISOR_TOKEN=secret STARTED="${WORK}/started" PATH="${WORK}/bin:${PATH}" bash -c '
+    source /usr/lib/bashio/bashio.sh
+    source "$0"
+' /etc/s6-overlay/s6-rc.d/web/run > "${WORK}/web.log" 2>&1
+expect 'a hard link in the page folder changes nothing' "$(stat -c '%G %a' /data/crash_guard/secret)" 'root 600'
 rm -rf /data/crash_guard
 
 rm -rf "${L}"
