@@ -7,7 +7,7 @@ abi <abi/3.0>,
 # root, the web page as user cgweb. It reads widely (logs, its data, the
 # configuration), but writes only its data and runtime files. Docker's own
 # default profile, under which the app ran before, is kept as the outer
-# bound. Measured on Home Assistant OS in complain mode before it enforced.
+# bound. Tested on a real installation.
 profile crash_guard flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 

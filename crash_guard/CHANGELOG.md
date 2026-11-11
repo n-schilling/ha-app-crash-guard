@@ -8,7 +8,7 @@ All notable changes to this app are documented here. The format follows [Keep a 
 
 - The web page no longer runs as root next to the Docker socket: it runs as a user of its own, without the Supervisor token, reads the guard's data through its group and writes only its requests for a check, to `/data/crash_guard/web`
 - The guard's data is readable for that group only, no longer for everyone in the app
-- An AppArmor profile of its own instead of Docker's default one: it keeps the default's limits and allows only the capabilities, networks, programs and places to write the app uses, measured on Home Assistant OS before it was enforced
+- An AppArmor profile of its own instead of Docker's default one: it keeps the default's limits and allows only the capabilities, networks, programs and places to write the app uses, tested on a real installation
 
 ## [2.2.0] - 2026-11-10
 
