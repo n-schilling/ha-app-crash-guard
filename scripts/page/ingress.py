@@ -53,6 +53,10 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", ""):
             self._reply(200, [("Content-Type", "text/html; charset=utf-8")], outer(query))
             return
+        if path == "/favicon.ico":
+            # Home Assistant has one; without it Chrome may log a 404 as a console error
+            self._reply(204, [], b"")
+            return
         if self.path != PREFIX and not self.path.startswith(PREFIX + "/") and not self.path.startswith(PREFIX + "?"):
             self._reply(404, [("Content-Type", "text/plain")], b"not found")
             return
