@@ -24,6 +24,10 @@ All notable changes to this app are documented here. The format follows [Keep a 
 - The helper that locates corrupted pages opens no path through a symlink and never blocks on a special file, reads the drive through the very file it opened and runs at most 10 minutes; a file it cannot read no longer stops it from locating the others
 - The host journal is read in full only when there is a new coredump, after a crash and every 15 minutes, instead of twice a minute
 
+### Removed
+
+- The option `notify_service`: Crash Guard no longer sends notifications itself. Notify from an automation on its problem sensors instead; the documentation has an example. A `notify_service` still in the options is ignored
+
 ### Fixed
 
 - Building the reference after a Home Assistant update, and a check while the Home Assistant container could not be read, dropped the page cache although `drop_on_schedule` is off. The reference is now read from the cache and straight from the drive, without a drop, and a check that cannot read the container is skipped

@@ -6,7 +6,7 @@ Defective RAM cells corrupt data in the page cache. Home Assistant then crashes 
 2. **Checks the cache.** At `drop_times` it hashes all Home Assistant program files through the page cache and compares them with a reference. A file that differs is read once more straight from the drive: if the drive holds the same, the file changed on the drive (for example a package Home Assistant installed) and the reference takes its new hash; only a difference between the cache and the drive counts as corrupted. Corrupted pages are located by physical address and logged.
 3. **Locks defective RAM.** For each page in `bad_pages` it reserves the surrounding 2 MB block in the device tree, so Linux never uses it again, and restores that lock after Home Assistant OS updates.
 4. **Counts every crash.** Crashes of any program on the host, logged by systemd-coredump, are counted since boot and within `crash_window_hours`, whatever their cause.
-5. **Reports.** Its page in Home Assistant shows everything it found, three problem sensors tell automations when something is wrong, and notifications go to `notify_service`.
+5. **Reports.** Its page in Home Assistant shows everything it found, and three problem sensors tell automations when something is wrong. The app sends no notifications itself: an automation on the sensors decides who hears about what (see [Example automations](#example-automations)).
 
 A crash of Home Assistant:
 
@@ -24,7 +24,7 @@ sequenceDiagram
     G->>S: start Home Assistant Core (unless an update or backup runs)
     G->>H: hash again, freshly read
     G->>G: keep the case, count the crash
-    G-->>G: notification, Crashes sensor on
+    G-->>G: Crashes sensor on
 ```
 
 A scheduled check, by default without dropping the cache:
@@ -37,7 +37,7 @@ flowchart LR
     hash --> differ{"Differs from<br/>the reference?"}
     differ -->|no| ok["Corrupted cache: off"]
     differ -->|"yes, drive = cache"| changed["Changed on the drive:<br/>reference takes the new hash"]
-    differ -->|"yes, drive ≠ cache"| bad["Corrupted in RAM: case,<br/>physical page, notification,<br/>Corrupted cache: on"]
+    differ -->|"yes, drive ≠ cache"| bad["Corrupted in RAM: case,<br/>physical page,<br/>Corrupted cache: on"]
     hash -->|"helper failed"| unknown["Corrupted cache: unknown"]
 ```
 
@@ -59,7 +59,7 @@ Crash Guard needs far more rights than a usual app. Each one serves a feature ab
 | Docker API (`docker_api`, protection mode off) | Everything Docker can do on the host, which is as much as root | Watching the Home Assistant container for crashes, reading the files of its image, starting short-lived helper containers |
 | Privileged helper containers | Root on the host for the helper's single command | Dropping the page cache, reading the physical addresses of corrupted pages, reading and writing the boot partition for the RAM lock |
 | Supervisor API, role `homeassistant` (`hassio_role: homeassistant`) | Starting, stopping and updating Home Assistant Core, reading the `info` of the Supervisor and its parts; not managing other apps, backups or the host | Starting Home Assistant after a crash, waiting for running updates and backups (`/jobs/info`), reading its own image |
-| Home Assistant API (`homeassistant_api`) | Calling any action and setting any state in Home Assistant | Notifications through `notify_service`, the entities when no MQTT broker is available |
+| Home Assistant API (`homeassistant_api`) | Calling any action and setting any state in Home Assistant | The entities when no MQTT broker is available, and a notice in Home Assistant when protection mode keeps the app from starting |
 | Ingress | A page in Home Assistant, reachable by administrators | Showing what the app found; the only thing the page can start is a cache check without dropping the cache |
 | Host journal (`journald`) | Reading all system logs of the host | Counting program crashes, saving kernel and coredump messages as evidence |
 | Home Assistant configuration, read-only | Reading all files of the configuration, including `secrets.yaml` | Saving the end of `home-assistant.log.fault` as evidence after a crash; only a regular file with a single name, never a symlink or hard link |
@@ -97,7 +97,6 @@ and shows the same message as a notification in Home Assistant. The notification
 | `verify_on_drop` | `true` | With `drop_on_schedule`, hash before and after the drop |
 | `check_interval` | `10` | Seconds between two crash checks |
 | `max_restarts_per_hour` | `3` | Crashes handled per hour at most |
-| `notify_service` | | Notification service such as `notify.mobile_app_phone`; empty sends none |
 | `bad_pages` | | Page frame numbers of defective pages, e.g. `0x1cc447`, taken from the page's **Memory lock** card |
 | `ram_lock` | `false` | Write the lock into the boot configuration and restore it; with `bad_pages` empty, take it out again. Off only reports its state and never touches the boot configuration |
 | `entity_prefix` | `crash_guard` | Prefix of the entity IDs |
@@ -114,7 +113,7 @@ and shows the same message as a notification in Home Assistant. The notification
 3. The app writes a device tree overlay (`badram-<pages>.dtbo`) to both boot slots and a `dtoverlay=` line to `config.txt`. The lock takes effect with the next host reboot; the memory lock problem sensor then turns off.
 4. Home Assistant OS updates replace the boot slot; the app restores the overlay within an hour, and the next reboot activates it again.
 
-To remove the lock, empty `bad_pages` and leave `ram_lock` on: within an hour the app takes its overlays out of both boot slots and its lines out of `config.txt`, and notifies you; the lock ends with the next host reboot. It removes only what it wrote itself (`badram-…` overlays, its marker and `dtoverlay` lines). With `ram_lock` off the app never writes the boot configuration; then delete the `dtoverlay=badram-…` line yourself.
+To remove the lock, empty `bad_pages` and leave `ram_lock` on: within an hour the app takes its overlays out of both boot slots and its lines out of `config.txt`, and logs it in its events; the lock ends with the next host reboot. It removes only what it wrote itself (`badram-…` overlays, its marker and `dtoverlay` lines). With `ram_lock` off the app never writes the boot configuration; then delete the `dtoverlay=badram-…` line yourself.
 
 ## Web page
 
@@ -146,20 +145,35 @@ The Crashes sensor follows a new coredump within a minute; when the window passe
 
 ## Example automations
 
-Notify when something is wrong:
+Crash Guard sends no notifications itself. To hear about a problem, notify from an automation on its sensors; replace `notify.notify` with the service that should reach you, and `crash_guard` with your `entity_prefix`.
+
+Notify when something is wrong, with what to do next:
 
 ```yaml
+alias: Crash Guard problem
+mode: queued
 triggers:
   - trigger: state
-    entity_id:
-      - binary_sensor.crash_guard_memory_lock_problem
-      - binary_sensor.crash_guard_corrupted_cache
-      - binary_sensor.crash_guard_crashes
+    entity_id: binary_sensor.crash_guard_crashes
     to: "on"
+    id: crashes
+  - trigger: state
+    entity_id: binary_sensor.crash_guard_corrupted_cache
+    to: "on"
+    id: corrupted_cache
+  - trigger: state
+    entity_id: binary_sensor.crash_guard_memory_lock_problem
+    to: "on"
+    id: memory_lock
 actions:
   - action: notify.notify
     data:
-      message: "Crash Guard: {{ trigger.to_state.name }}. Details on the Crash Guard page."
+      title: Crash Guard
+      message: >-
+        {{ {'crashes': 'Home Assistant or a program on the host crashed.',
+            'corrupted_cache': 'The cache check found corrupted files: defective RAM.',
+            'memory_lock': 'The RAM lock is not in effect yet; a host reboot may be needed.'}[trigger.id] }}
+        Details on the Crash Guard page.
 ```
 
 Notify when a cache check could not run:

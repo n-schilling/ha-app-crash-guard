@@ -14,9 +14,6 @@ configuration:
   max_restarts_per_hour:
     name: Restarts per hour
     description: Crashes handled at most per hour; beyond that the app only logs.
-  notify_service:
-    name: Notify service
-    description: Service for notifications, e.g. notify.mobile_app_phone; empty sends none.
   bad_pages:
     name: Defective RAM pages
     description: Page frame numbers (e.g. 0x1cc447) of known defective RAM pages, from badpages.log. Each locks the 2 MB block around it.

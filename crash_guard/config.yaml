@@ -30,7 +30,6 @@ options:
   drop_on_schedule: false
   check_interval: 10
   max_restarts_per_hour: 3
-  notify_service: ""
   bad_pages: []
   ram_lock: false
   entity_prefix: crash_guard
@@ -46,7 +45,6 @@ schema:
   drop_on_schedule: bool
   check_interval: int(5,300)
   max_restarts_per_hour: int(1,10)
-  notify_service: match(^(notify\.[a-z0-9_]+)?$)?
   bad_pages:
     - match(^0x[0-9a-fA-F]+$)
   ram_lock: bool

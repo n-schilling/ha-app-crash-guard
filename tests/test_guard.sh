@@ -47,7 +47,6 @@ start_guard() {
                 verify_on_drop) echo true ;;
                 drop_on_schedule) echo false ;;
                 ram_lock) echo false ;;
-                notify_service) echo notify.test ;;
                 entity_prefix) echo test ;;
                 name_prefix) echo Test ;;
                 crash_window_hours) echo 24 ;;
@@ -131,8 +130,7 @@ expect 'with the logs' "$(find /data/crash_guard/cases -name container.log | wc 
 expect 'without the full hash lists' "$(find /data/crash_guard/cases -name '*.sha' | wc -l | tr -d ' ')" 0
 expect 'a symlinked fault log is not copied' "$(grep -rl hunter2 /data/crash_guard/cases 2>/dev/null | wc -l | tr -d ' ')" 0
 expect 'nothing reaches /share' "$(requests '.path == "/containers/create"' | jq -r '.body.HostConfig.Binds // [] | .[]' | grep -c share)" 0
-expect 'notification sent' "$(requests '.path == "/core/api/services/notify/test"' | jq -r '.body.message' | grep -c 'crashed at')" 1
-expect 'it names the case on the page' "$(requests '.path == "/core/api/services/notify/test"' | jq -r '.body.message' | grep -c 'on the Crash Guard page')" 1
+expect 'no notification of its own (automations use the sensors)' "$(count '.path | startswith("/core/api/services/notify")')" 0
 wait_for '[[ "$(status ".crashes.home_assistant | length")" == 1 ]]' 15
 expect 'the crash is on the web page' "$(status '.crashes.home_assistant[0].message')" \
     "$(events_log | grep 'Crash handled' | cut -d' ' -f2-)"
@@ -175,14 +173,14 @@ expect 'stops on TERM' "$(kill -0 "${GUARD}" 2>/dev/null && echo running || echo
 
 echo '# A check whose hash helper fails'
 touch "${FAKE}/hash_fails"
-notified=$(count '.path == "/core/api/services/notify/test"')
+corrupted_before=$(events_log | grep -c 'CORRUPTED')
 start_guard
 wait_for 'grep -c "Crash Guard active" "${WORK}/log" | grep -q 2' 30
 touch /data/crash_guard/check.request
 wait_for 'events_log | grep -q "Check (no drop) failed"' 30
 expect 'the failure is logged with the answer' "$(events_log | grep -c 'Check (no drop) failed: sha256sum: read error')" 1
 expect 'as an unknown result' "$(tail -1 /data/crash_guard/drops.log | cut -d' ' -f2-)" 'cache=? fresh=- (check failed)'
-expect 'no RAM error reported' "$(count '.path == "/core/api/services/notify/test"')" "${notified}"
+expect 'no RAM error reported' "$(events_log | grep -c 'CORRUPTED')" "${corrupted_before}"
 expect 'no case kept' "$(find /data/crash_guard/cases -mindepth 1 -maxdepth 1 -name '*-check' | wc -l | tr -d ' ')" 0
 wait_for '[[ "$(state binary_sensor.test_corrupted_cache .body.state)" == unknown ]]' 15
 expect 'corrupted cache turns unknown' "$(state binary_sensor.test_corrupted_cache .body.state)" unknown

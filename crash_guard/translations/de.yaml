@@ -14,9 +14,6 @@ configuration:
   max_restarts_per_hour:
     name: Neustarts pro Stunde
     description: Höchstens so viele Abstürze pro Stunde werden behandelt; darüber protokolliert die App nur.
-  notify_service:
-    name: Benachrichtigungsdienst
-    description: Dienst für Benachrichtigungen, z. B. notify.mobile_app_handy; leer sendet keine.
   bad_pages:
     name: Defekte RAM-Seiten
     description: Page Frame Numbers (z. B. 0x1cc447) bekannter defekter RAM-Seiten aus badpages.log. Jede sperrt den 2-MB-Block um sie herum.

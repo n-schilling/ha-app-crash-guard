@@ -57,8 +57,7 @@ flowchart LR
     helpers <--> boot
     guard -->|"start after a crash"| core["Home Assistant Core"]
     guard -->|"MQTT discovery<br/>or states"| sensors["Problem sensors<br/>memory lock, corrupted cache, crashes"]
-    guard -->|"notify_service"| notify["Notifications"]
-    sensors --> automations["Your automations"]
+    sensors --> automations["Your automations<br/>for example notifications"]
 ```
 
 The guard service watches the Home Assistant container and the host journal, checks the page cache at fixed times and keeps the RAM lock in place; the short-lived helper containers do what needs more rights. Everything it finds stays in its private data, where the page reads it. How each part works, with diagrams of the crash handling and the cache check, is in [the documentation](crash_guard/DOCS.md).

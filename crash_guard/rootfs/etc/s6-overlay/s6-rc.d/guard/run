@@ -53,8 +53,6 @@ MAX_RESTARTS=$(bashio::config 'max_restarts_per_hour')
 VERIFY=$(bashio::config 'verify_on_drop')
 DROP_ON_SCHEDULE=$(bashio::config 'drop_on_schedule')
 RAM_LOCK=$(bashio::config 'ram_lock')
-NOTIFY=''
-bashio::config.has_value 'notify_service' && NOTIFY=$(bashio::config 'notify_service')
 ENTITY_PREFIX=$(bashio::config 'entity_prefix')
 NAME_PREFIX=$(bashio::config 'name_prefix')
 CRASH_WINDOW_H=$(bashio::config 'crash_window_hours')
@@ -62,7 +60,7 @@ CASES_TO_KEEP=$(bashio::config 'cases_to_keep')
 [[ "${CASES_TO_KEEP}" =~ ^[0-9]+$ ]] || CASES_TO_KEEP=20
 mapfile -t DROP_TIMES < <(bashio::config 'drop_times')
 mapfile -t BAD_PAGES < <(bashio::config 'bad_pages' | sed '/^null$/d; /^$/d')
-readonly INTERVAL MAX_RESTARTS VERIFY DROP_ON_SCHEDULE RAM_LOCK NOTIFY ENTITY_PREFIX NAME_PREFIX CRASH_WINDOW_H CASES_TO_KEEP DROP_TIMES BAD_PAGES
+readonly INTERVAL MAX_RESTARTS VERIFY DROP_ON_SCHEDULE RAM_LOCK ENTITY_PREFIX NAME_PREFIX CRASH_WINDOW_H CASES_TO_KEEP DROP_TIMES BAD_PAGES
 
 # RAM lock: a device tree overlay reserves the aligned 2 MB block around each
 # defective page; cg-lock.py builds it from bad_pages
@@ -352,7 +350,6 @@ scheduled_check() {
     else
         keep_case "${d}"
         event "Check (no drop): CORRUPTED in cache ${n}, cache deliberately NOT dropped (case ${KEPT})"
-        notify 'Crash Guard: RAM error in the cache' "At the check at $(date +%H:%M), ${n} Home Assistant file(s) in the page cache were corrupted. The cache was deliberately not dropped (otherwise the defective page moves to freshly started programs). Known defective RAM pages: $(known_pages). Details: case ${KEPT} on the Crash Guard page"
     fi
 }
 
@@ -390,15 +387,6 @@ core_job_running() {
 }
 
 ha_api_up() { curl -sf -o /dev/null -H "@${AUTH}" http://supervisor/core/api/; }
-
-notify() {
-    [[ -n "${NOTIFY}" ]] || return 0
-    jq -nc --arg t "$1" --arg m "$2" '{title:$t, message:$m}' \
-        | curl -sf -o /dev/null -X POST -H "@${AUTH}" \
-            -H 'Content-Type: application/json' -d @- \
-            "http://supervisor/core/api/services/${NOTIFY%%.*}/${NOTIFY#*.}" \
-        || bashio::log.warning 'Notification failed'
-}
 
 # --- RAM lock --------------------------------------------------------------------
 # cg-lock.py in the privileged helper container (sees /sys/firmware) with the
@@ -558,9 +546,6 @@ lock_cycle() {
         st=$(lock_helper install)
         if jq -e '.changed == true' >/dev/null 2>&1 <<< "${st}"; then
             event "RAM lock set up/restored: $(jq -c . <<< "${st}")"
-            if jq -e '.active != true' >/dev/null <<< "${st}"; then
-                notify 'Crash Guard: RAM lock prepared' "The lock for the defective RAM area ${LOCK_RANGE} is in the boot configuration ($(jq -r .slot <<< "${st}")). It takes effect with the next host reboot."
-            fi
         fi
     fi
     if jq -e '.error' >/dev/null <<< "${st}"; then
@@ -577,7 +562,6 @@ lock_cycle() {
         grep -qxF "${pfn}" "${PRIV}/notified_pfns" 2>/dev/null && continue
         echo "${pfn}" >> "${PRIV}/notified_pfns"
         event "Defective page ${pfn} is OUTSIDE the RAM lock"
-        notify 'Crash Guard: new defective RAM page' "The defective page ${pfn} is outside the current lock (${LOCK_RANGE}). Add it to bad_pages to extend the lock. Details on the Crash Guard page"
     done
     publish_lock "${st}" "${outside}"
 }
@@ -592,7 +576,6 @@ unlock_cycle() {
         event "RAM lock: removal failed: ${st:-no answer}"
     elif jq -e '.changed == true' > /dev/null <<< "${st}"; then
         event 'RAM lock removed from the boot configuration (no bad_pages); it ends with the next host reboot'
-        notify 'Crash Guard: RAM lock removed' 'bad_pages is empty, so the lock of defective RAM was taken out of the boot configuration. It ends with the next host reboot.'
     fi
 }
 
@@ -670,7 +653,6 @@ handle_crash() {
     ha_api_up && up='running again'
     c1=$(count_of "${r1}") c2=$(count_of "${r2}")
     event "Crash handled: exit ${code}, corrupted in cache ${c1:-?}, afterwards ${c2:-?}, Home Assistant ${up} (case ${KEPT})"
-    notify 'Home Assistant crash handled' "Home Assistant crashed at $(date -d "@${when}" +%H:%M) (exit ${code}). Page cache dropped, Home Assistant ${up}. Corrupted files in the cache: ${c1:-unknown}. Known defective RAM pages: $(known_pages). Evidence: case ${KEPT} on the Crash Guard page"
 }
 
 # Returns the Home Assistant container's events since $1 (nanoseconds) as
