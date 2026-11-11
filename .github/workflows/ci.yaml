@@ -115,7 +115,11 @@ jobs:
       - name: Playwright
         run: |
           pip install playwright==1.65.0
-          python -m playwright install --with-deps chromium
+          # The runner's Google Chrome, which the script prefers; Playwright's
+          # Chromium (and its packages from apt) only where there is none
+          if ! command -v google-chrome > /dev/null; then
+            python -m playwright install --with-deps chromium
+          fi
       # The built image with made-up data behind a stand-in for the ingress,
       # in throwaway containers; headless Chromium as Home Assistant shows it
       - name: Check the page
