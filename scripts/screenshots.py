@@ -16,7 +16,7 @@ Supervisor's (172.30.32.0/23):
   answers (scripts/page/ingress.py): the page under the path prefix
   /api/hassio_ingress/<token>/, and at / inside an iframe as in Home Assistant.
 
-Headless Chromium opens it and checks: the header (name, stamp, refresh,
+Headless Chromium opens it and checks: the header (icon, name, stamp, refresh,
 settings link with target _top and the right slug; back arrow on a subpage),
 the version line, no console errors and no CSP violations, light, dark and
 phone width, in English and German, that refresh, the check button,
@@ -177,6 +177,12 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str) ->
         tags: kids.map((k) => k.tagName.toLowerCase() + (k.className ? "." + k.className.split(" ").join(".") : "")),
         h1: header.querySelector(":scope > h1")?.textContent,
         back: kids[0].matches("a.icon-button") ? {href: kids[0].getAttribute("href"), title: kids[0].title} : null,
+        // The store icon left of the name: loaded, 24 px, in the row of the name
+        icon: kids[0].matches("img.app-icon") ? (() => {
+          const box = kids[0].getBoundingClientRect(), name = header.querySelector(":scope > h1").getBoundingClientRect();
+          return {src: kids[0].getAttribute("src"), loaded: kids[0].complete && kids[0].naturalWidth > 0,
+                  size: [box.width, box.height], row: Math.abs((box.top + box.bottom) / 2 - (name.top + name.bottom) / 2) < 2};
+        })() : null,
         actions: actions ? [...actions.children].map((a) => ({
           tag: a.tagName.toLowerCase(), cls: a.className, id: a.id, text: a.textContent.trim(),
           href: a.getAttribute("href"), target: a.getAttribute("target"), role: a.getAttribute("role"),
@@ -193,7 +199,9 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str) ->
         check(h["tags"][:2] == ["a.icon-button", "h1"] and h["back"] == {"href": "?", "title": t["back"]},
               f"{where}: back arrow before the h1 ({h['tags']}, {h['back']})")
     else:
-        check(h["tags"][0] == "h1", f"{where}: h1 first in the header ({h['tags']})")
+        check(h["tags"][:2] == ["img.app-icon", "h1"], f"{where}: icon, then the h1 ({h['tags']})")
+        check(h["icon"] == {"src": "icon.png", "loaded": True, "size": [24, 24], "row": True},
+              f"{where}: the app's icon shows, 24 px, in the row of the name ({h['icon']})")
     check((h["h1"] or "").startswith(NAME), f"{where}: h1 names the app ({h['h1']!r})")
     check(h["tags"][-1] == "div.actions", f"{where}: .actions last in the header")
     a = h["actions"]

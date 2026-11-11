@@ -196,8 +196,25 @@ def shared_script() -> str:
         LOGGER.warning("Script %s missing", SHARED_SCRIPT_FILE)
         return ""
 
+# The app's store icon at the left of the header, copied into the image next
+# to the stylesheet; the page links it as icon.png, relative to the ingress path
+APP_ICON_FILE = SHARED_STYLE_FILE.with_name("icon.png")
+
+
+def app_icon() -> bytes | None:
+    try:
+        return APP_ICON_FILE.read_bytes()
+    except OSError:
+        LOGGER.warning("Icon %s missing", APP_ICON_FILE)
+        return None
+
+
+APP_ICON = app_icon()
+APP_ICON_TAG = '<img class="app-icon" src="icon.png" alt="" width="24" height="24">'
+
 # What only this page needs, after the shared stylesheet
 STYLE = """
+header > .app-icon { flex: none; width: 24px; height: 24px; margin-right: 12px; }
 header > .icon-button:first-child { margin-left: -12px; }
 header > .icon-button + h1 { margin-left: 12px; }
 .card h3 { margin: 0; padding: 8px 16px; font-size: var(--ha-font-size-m); font-weight: var(--ha-font-weight-medium);
@@ -280,7 +297,7 @@ SCRIPT_HASH = "sha256-" + base64.b64encode(hashlib.sha256(SCRIPT.encode()).diges
 # Nothing but this page and its own requests; no frame of another site
 SECURITY_HEADERS = {
     "Content-Security-Policy": f"default-src 'none'; style-src 'unsafe-inline'; script-src '{SCRIPT_HASH}'; "
-                               "connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
+                               "img-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
@@ -807,7 +824,7 @@ def render(data: Path, lang: str, slug: str | None, query: dict[str, list[str]],
     now = time.time() if now is None else now
     if not (case and CASE_NAME.match(case)):
         body = overview(f, data, now)
-        start = f'<h1>{esc(t["title"])}</h1>'
+        start = f'{APP_ICON_TAG}<h1>{esc(t["title"])}</h1>'
     actions = f'<span class="stamp opt">{esc(t["as_of"].format(time.strftime("%H:%M:%S", time.localtime(now))))}</span>'
     actions += f'<a class="icon-button" href="" id="refresh" title="{esc(t["refresh"])}" role="button">{icon("refresh")}</a>'
     # The settings are Home Assistant's own page, outside the ingress frame
@@ -838,7 +855,7 @@ def handler(data: Path, slug: str | None, allowed: set[str], version: str | None
         def _refused(self) -> bool:
             if allowed and self.client_address[0] not in allowed:
                 self._send(403, "text/plain", b"only through Home Assistant")
-            elif self.path.split("?", 1)[0] != "/":
+            elif self.path.split("?", 1)[0] not in ("/", "/icon.png"):
                 self._send(404, "text/plain", b"not found")
             else:
                 return False
@@ -846,6 +863,12 @@ def handler(data: Path, slug: str | None, allowed: set[str], version: str | None
 
         def do_GET(self) -> None:  # noqa: N802 (the standard library's name)
             if self._refused():
+                return
+            if self.path.split("?", 1)[0] == "/icon.png":
+                if APP_ICON is None:
+                    self._send(404, "text/plain", b"not found")
+                else:
+                    self._send(200, "image/png", APP_ICON, {"Cache-Control": "max-age=86400"})
                 return
             query = parse_qs(self.path.partition("?")[2])
             lang = lang_of(self.headers.get("Cookie"), self.headers.get("Accept-Language"))
@@ -861,6 +884,9 @@ def handler(data: Path, slug: str | None, allowed: set[str], version: str | None
 
         def do_POST(self) -> None:  # noqa: N802
             if self._refused():
+                return
+            if self.path.split("?", 1)[0] != "/":
+                self._send(405, "text/plain", b"not allowed", {"Allow": "GET"})
                 return
             if self.headers.get("X-Crash-Guard") != "check":
                 self._send(403, "text/plain", b"only from the page")

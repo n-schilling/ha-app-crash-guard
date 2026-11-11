@@ -296,6 +296,28 @@ class Server(Fixture):
         self.assertEqual(self.get("/", "POST", {"X-Crash-Guard": "check"})[0], 429)
         self.assertFalse(target.exists())
 
+    def test_app_icon(self) -> None:
+        # The store icon, copied into the image; the page links it relative to the ingress path
+        # (in the image the checkout is not there; the image's copy is then the one to serve)
+        repo = TESTS.parent / "crash_guard/icon.png"
+        icon = repo.read_bytes() if repo.exists() else w.APP_ICON
+        self.assertTrue(icon and icon.startswith(b"\x89PNG"), "icon.png in the image or the checkout")
+        w.APP_ICON, saved = icon, w.APP_ICON
+        try:
+            with urllib.request.urlopen(self.url + "/icon.png") as answer:
+                self.assertEqual((answer.status, answer.headers["Content-Type"], answer.read()), (200, "image/png", icon))
+                self.assertEqual(answer.headers["Cache-Control"], "max-age=86400")
+            self.assertEqual(self.get("/icon.png", "POST", {"X-Crash-Guard": "check"})[0], 405)
+            w.APP_ICON = None
+            self.assertEqual(self.get("/icon.png")[0], 404)
+        finally:
+            w.APP_ICON = saved
+        page = self.get("/")
+        self.assertIn("img-src 'self'", page[1]["Content-Security-Policy"])
+        self.assertIn('<header><img class="app-icon" src="icon.png" alt="" width="24" height="24"><h1>', page[2])
+        # A subpage has the back arrow there instead
+        self.assertIn('<header><a class="icon-button" href="?"', self.get(f"/?case={CRASH}")[2])
+
     def test_other_paths(self) -> None:
         self.assertEqual(self.get("/cases/" + CRASH)[0], 404)
         self.assertEqual(self.get("/../status.json")[0], 404)

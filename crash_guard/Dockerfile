@@ -20,6 +20,8 @@ RUN \
     && useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin cgweb
 
 COPY rootfs /
+# The store icon, also at the left of the page's header (served as icon.png)
+COPY icon.png /usr/local/share/ha-app/icon.png
 
 ARG BUILD_ARCH BUILD_DATE BUILD_DESCRIPTION BUILD_NAME BUILD_REF BUILD_REPOSITORY BUILD_VERSION
 # s6-overlay: warnings and errors only, no per-service start/stop info lines.
