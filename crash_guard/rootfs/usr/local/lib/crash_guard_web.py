@@ -110,6 +110,7 @@ TEXT = {
         "check_now": "Check now", "check_queued": "Check requested, starts within a few seconds",
         "check_running": "Check running", "check_again": "Possible again at {}",
         "check_failed": "The check could not be requested.",
+        "overview": "Overview", "log": "Log", "newest_cases": "Newest cases", "all_cases": "All cases",
     },
     "de": {
         "title": "Crash Guard", "settings": "Einstellungen", "refresh": "Aktualisieren", "as_of": "Stand {}",
@@ -148,11 +149,17 @@ TEXT = {
         "check_now": "Jetzt prüfen", "check_queued": "Prüfung angefordert, startet in wenigen Sekunden",
         "check_running": "Prüfung läuft", "check_again": "Wieder möglich um {}",
         "check_failed": "Die Prüfung konnte nicht angefordert werden.",
+        "overview": "Übersicht", "log": "Protokoll", "newest_cases": "Neueste Fälle", "all_cases": "Alle Fälle",
     },
 }
 
 # Material Design Icons (Apache 2.0), as Home Assistant draws them
 ICONS = {
+    "overview": "M19,5V7H15V5H19M9,5V11H5V5H9M19,13V19H15V13H19M9,17V19H5V17H9M21,3H13V9H21V3M11,3H3V13H11V3M21,11H13V21H21V11M11,15H3V21H11V15Z",
+    "lock": "M17,17H7V7H17M21,11V9H19V7C19,5.89 18.1,5 17,5H15V3H13V5H11V3H9V5H7C5.89,5 5,5.89 5,7V9H3V11H5V13H3V15H5V17A2,2 0 0,0 7,19H9V21H11V19H13V21H15V19H17A2,2 0 0,0 19,17V15H21V13H19V11M13,13H11V11H13M15,9H9V15H15V9Z",
+    "crashes": "M8.27,3L3,8.27V15.73L8.27,21H15.73C17.5,19.24 21,15.73 21,15.73V8.27L15.73,3M9.1,5H14.9L19,9.1V14.9L14.9,19H9.1L5,14.9V9.1M11,15H13V17H11V15M11,7H13V13H11V7",
+    "cases": "M20,18H4V8H20M20,6H12L10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6Z",
+    "log": "M5,3C3.89,3 3,3.89 3,5V19C3,20.11 3.89,21 5,21H19C20.11,21 21,20.11 21,19V5C21,3.89 20.11,3 19,3H5M5,5H19V19H5V5M7,7V9H17V7H7M7,11V13H17V11H7M7,15V17H14V15H7Z",
     "settings": "M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8M12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10M10,22C9.75,22 9.54,21.82 9.5,21.58L9.13,18.93C8.5,18.68 7.96,18.34 7.44,17.94L4.95,18.95C4.73,19.03 4.46,18.95 4.34,18.73L2.34,15.27C2.21,15.05 2.27,14.78 2.46,14.63L4.57,12.97L4.5,12L4.57,11L2.46,9.37C2.27,9.22 2.21,8.95 2.34,8.73L4.34,5.27C4.46,5.05 4.73,4.96 4.95,5.05L7.44,6.05C7.96,5.66 8.5,5.32 9.13,5.07L9.5,2.42C9.54,2.18 9.75,2 10,2H14C14.25,2 14.46,2.18 14.5,2.42L14.87,5.07C15.5,5.32 16.04,5.66 16.56,6.05L19.05,5.05C19.27,4.96 19.54,5.05 19.66,5.27L21.66,8.73C21.79,8.95 21.73,9.22 21.54,9.37L19.43,11L19.5,12L19.43,13L21.54,14.63C21.73,14.78 21.79,15.05 21.66,15.27L19.66,18.73C19.54,18.95 19.27,19.04 19.05,18.95L16.56,17.95C16.04,18.34 15.5,18.68 14.87,18.93L14.5,21.58C14.46,21.82 14.25,22 14,22H10M11.25,4L10.88,6.61C9.68,6.86 8.62,7.5 7.85,8.39L5.44,7.35L4.69,8.65L6.8,10.2C6.4,11.37 6.4,12.64 6.8,13.8L4.68,15.36L5.43,16.66L7.86,15.62C8.63,16.5 9.68,17.14 10.87,17.38L11.24,20H12.76L13.13,17.39C14.32,17.14 15.37,16.5 16.14,15.62L18.57,16.66L19.32,15.36L17.2,13.81C17.6,12.64 17.6,11.37 17.2,10.2L19.31,8.65L18.56,7.35L16.15,8.39C15.38,7.5 14.32,6.86 13.12,6.62L12.75,4H11.25Z",
     "ok": "M12 2C6.5 2 2 6.5 2 12S6.5 22 12 22 22 17.5 22 12 17.5 2 12 2M10 17L5 12L6.41 10.59L10 14.17L17.59 6.58L19 8L10 17Z",
     "alert": "M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z",
@@ -215,6 +222,33 @@ APP_ICON_TAG = '<img class="app-icon" src="icon.png" alt="" width="24" height="2
 # What only this page needs, after the shared stylesheet
 STYLE = """
 header > .app-icon { flex: none; width: 24px; height: 24px; margin-right: 12px; }
+header > h1 { flex: none; }
+/* The views as tabs in the header row, like Home Assistant's own (and Network
+   Plus); on phone width a bar at the bottom with icons, as in its app */
+header > nav.tabs { display: flex; align-self: stretch; min-width: 0; margin-left: 24px; overflow-x: auto;
+  scrollbar-width: none; }
+nav.tabs > a { display: flex; align-items: center; justify-content: center; padding: 0 20px; position: relative;
+  color: var(--sidebar-text-color); font-weight: var(--ha-font-weight-medium); white-space: nowrap; opacity: .8; }
+nav.tabs > a:hover { background: var(--ha-hover); }
+nav.tabs > a.active { color: var(--primary-color); opacity: 1; }
+nav.tabs > a.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--primary-color); }
+nav.tabs > a > svg { display: none; }
+@media (max-width: 600px) {
+  header > nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; margin: 0; overflow: hidden;
+    background: var(--sidebar-background-color); border-top: 1px solid var(--divider-color);
+    padding-bottom: env(safe-area-inset-bottom); }
+  nav.tabs > a { flex: 1 1 0; flex-direction: column; gap: 2px; height: 56px; padding: 6px 2px 4px; min-width: 0;
+    font-size: 11px; }
+  nav.tabs > a > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  nav.tabs > a > svg { display: block; padding: 2px 12px; border-radius: 14px; box-sizing: content-box; }
+  nav.tabs > a.active > svg { background: color-mix(in srgb, var(--primary-color) 15%, transparent); }
+  nav.tabs > a.active::after { display: none; }
+  body:has(> header > nav.tabs) { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+}
+a.state { margin: 0 -8px 4px; padding: 4px 8px; border-radius: 8px; }
+a.state:hover { background: var(--ha-hover); }
+a.state > svg.go { margin-left: auto; align-self: center; color: var(--secondary-text-color); }
 header > .icon-button:first-child { margin-left: -12px; }
 header > .icon-button + h1 { margin-left: 12px; }
 .card h3 { margin: 0; padding: 8px 16px; font-size: var(--ha-font-size-m); font-weight: var(--ha-font-weight-medium);
@@ -543,12 +577,16 @@ def card(title: str | None, content: str, padded: bool = True, actions: str = ""
     return f'<div class="card">{head}{inner}{actions}</div>'
 
 
-def line(kind: str, title: str, text: str, sub: str = "") -> str:
-    """A row of the status card: ok, bad or muted."""
+def line(kind: str, title: str, text: str, sub: str = "", tab: str = "") -> str:
+    """A row of the status card: ok, bad or muted; a link to its view."""
     name = {"ok": "ok", "bad": "alert"}.get(kind, "info")
     sub = f'<span class="sub">{sub}</span>' if sub else ""
-    return (f'<div class="state {"muted" if kind == "off" else kind}">{icon(name)}<div class="text">'
-            f'<b>{esc(title)}</b><span class="sub">{esc(text)}</span>{sub}</div></div>')
+    inner = (f'{icon(name)}<div class="text"><b>{esc(title)}</b><span class="sub">{esc(text)}</span>{sub}</div>')
+    cls = f'state {"muted" if kind == "off" else kind}'
+    if tab:
+        return f'<a class="{cls}" href="?tab={tab}">{inner}{icon("chevron", "go")}</a>'
+    return f'<div class="{cls}">{inner}</div>'
+
 
 
 def short_path(path: str) -> str:
@@ -564,16 +602,16 @@ def yes(t: dict, value) -> str:
 def lock_line(f: Format, status: dict) -> str:
     t, lock = f.t, status.get("lock")
     if not lock:
-        return line("off", t["lock"], t["no_pages"])
+        return line("off", t["lock"], t["no_pages"], tab="lock")
     rng = lock.get("range") or ""
     if lock.get("error"):
-        return line("bad", t["lock"], t["lock_error"].format(lock["error"]))
+        return line("bad", t["lock"], t["lock_error"].format(lock["error"]), tab="lock")
     outside = lock.get("outside") or []
     sub = esc(t["outside"].format(", ".join(outside))) if outside else ""
     if lock.get("active"):
-        return line("bad" if outside else "ok", t["lock"], t["lock_on"].format(rng), sub)
+        return line("bad" if outside else "ok", t["lock"], t["lock_on"].format(rng), sub, "lock")
     text = t["lock_ready"] if lock.get("ready") else t["lock_off"]
-    return line("bad", t["lock"], text.format(rng), sub)
+    return line("bad", t["lock"], text.format(rng), sub, "lock")
 
 
 def cache_line(f: Format, status: dict) -> str:
@@ -582,11 +620,11 @@ def cache_line(f: Format, status: dict) -> str:
     when = f'{esc(t["checked"])} {esc(f.stamp(check.get("when") or ""))}'
     if n is None:
         if check.get("when"):
-            return line("bad", t["cache"], t["cache_failed"], when)
-        return line("off", t["cache"], t["cache_none"])
+            return line("bad", t["cache"], t["cache_failed"], when, "log")
+        return line("off", t["cache"], t["cache_none"], tab="log")
     if n == 0:
-        return line("ok", t["cache"], t["cache_ok"], when)
-    return line("bad", t["cache"], t["cache_bad"].format(n), when)
+        return line("ok", t["cache"], t["cache_ok"], when, "log")
+    return line("bad", t["cache"], t["cache_bad"].format(n), when, "log")
 
 
 def crash_line(f: Format, status: dict) -> str:
@@ -596,8 +634,8 @@ def crash_line(f: Format, status: dict) -> str:
     programs = c.get("programs_count", len(c.get("programs") or []))
     sub = esc(f"{t['since_boot']}: {c.get('boot', t['unknown'])}")
     if ha or programs:
-        return line("bad", t["crashes"], t["crashes_bad"].format(ha, programs, window), sub)
-    return line("ok", t["crashes"], t["crashes_ok"].format(window), sub)
+        return line("bad", t["crashes"], t["crashes_bad"].format(ha, programs, window), sub, "crashes")
+    return line("ok", t["crashes"], t["crashes_ok"].format(window), sub, "crashes")
 
 
 def lock_card(f: Format, status: dict, data: Path) -> str:
@@ -629,10 +667,12 @@ def lock_card(f: Format, status: dict, data: Path) -> str:
 
 
 def crashes_card(f: Format, status: dict) -> str:
-    """The crashes within the window; none is said by the status card already."""
+    """The crashes within the window, or that there were none."""
     t, c = f.t, status.get("crashes") or {}
+    window = f.hours(int(c.get("window_hours") or 24))
     if not (c.get("home_assistant") or c.get("programs")):
-        return ""
+        return card(f'{t["crashes"]} · {window}', f'<p class="muted">{esc(t["no_crashes"])}</p>'
+                    f'<p class="sub">{esc(t["since_boot"])}: {esc(c.get("boot", t["unknown"]))}</p>')
     ha = "".join(f'<tr><td class="nowrap">{esc(f.stamp(e.get("time", "")))}</td><td>{esc(e.get("message", ""))}</td></tr>'
                  for e in c.get("home_assistant") or [])
     programs = "".join(f'<tr><td class="nowrap">{esc(f.stamp(e.get("time", "")))}</td>'
@@ -649,14 +689,15 @@ def crashes_card(f: Format, status: dict) -> str:
     shown, total = len(c.get("programs") or []), c.get("programs_count", 0)
     if total > shown:
         body += f'<div class="note">{esc(t["newest"].format(shown, total))}</div>'
-    window = f.hours(int(c.get("window_hours") or 24))
     return card(f'{t["crashes"]} · {window}', body, padded=False)
 
 
-def cases_card(f: Format, status: dict, data: Path, events: list[str]) -> str:
+def cases_card(f: Format, status: dict, data: Path, events: list[str], newest: int = 0) -> str:
+    """All cases; with newest, only that many, for the overview."""
     t = f.t
     rows = []
-    for name in cases(data):
+    names = cases(data)
+    for name in names[:newest] if newest else names:
         kind = name.rsplit("-", 1)[1]
         href = "?" + urlencode({"case": name})
         rows.append(f'<tr class="link" data-href="{esc(href)}"><td class="nowrap">{esc(f.when(case_time(name)))}'
@@ -664,10 +705,13 @@ def cases_card(f: Format, status: dict, data: Path, events: list[str]) -> str:
                     f'<td class="opt">{esc(event_of(events, name))}</td>'
                     f'<td class="go"><a href="{esc(href)}" aria-label="{esc(name)}">{icon("chevron")}</a></td></tr>')
     body = "".join(rows) or f'<tr><td colspan="3" class="muted">{esc(t["no_cases"])}</td></tr>'
+    table = f'<div class="scroll"><table class="list"><tbody>{body}</tbody></table></div>'
+    if newest:
+        more = f'<div class="card-actions"><a class="button" href="?tab=cases">{esc(t["all_cases"])}</a></div>'
+        return card(t["newest_cases"], table + (more if len(names) > newest else ""), padded=False)
     keep = status.get("cases_to_keep")
     note = f'<div class="note">{esc(t["kept"].format(keep))}</div>' if keep else ""
-    return card(t["cases"], f'<div class="scroll"><table class="list"><tbody>{body}</tbody></table></div>{note}',
-                padded=False)
+    return card(t["cases"], table + note, padded=False)
 
 
 def log_card(f: Format, data: Path, events: list[str]) -> str:
@@ -688,17 +732,41 @@ def log_card(f: Format, data: Path, events: list[str]) -> str:
         f'<tbody>{drops}</tbody></table></div>'), padded=False)
 
 
-def overview(f: Format, data: Path, now: float) -> str:
+# The views of the page, each a tab in the header: (id, label)
+TABS = (("overview", "overview"), ("lock", "lock"), ("crashes", "crashes"), ("cases", "cases"), ("log", "log"))
+NEWEST_CASES = 3
+
+
+def tab_of(query: dict[str, list[str]]) -> str:
+    tab = (query.get("tab") or [""])[0]
+    return tab if tab in dict(TABS) else "overview"
+
+
+def view(f: Format, data: Path, now: float, tab: str) -> str:
+    """The content of one tab: the overview sums up, the other views hold the details."""
     t = f.t
     status = load_status(data)
     events = lines_of(data, "events.log")
+    if tab == "log":
+        return log_card(f, data, events)
     if status is None:
-        return card(t["status"], f'<p class="muted">{esc(t["loading"])}</p>') + log_card(f, data, events)
+        return card(t["status"], f'<p class="muted">{esc(t["loading"])}</p>')
+    if tab == "lock":
+        return lock_card(f, status, data)
+    if tab == "crashes":
+        return crashes_card(f, status)
+    if tab == "cases":
+        return cases_card(f, status, data, events)
     state = card(t["status"], lock_line(f, status) + cache_line(f, status) + crash_line(f, status),
                  actions=check_row(f, data, now))
-    return (f'<div class="cards"><div>{state}{crashes_card(f, status)}</div>'
-            f'<div>{lock_card(f, status, data)}</div></div>'
-            + cases_card(f, status, data, events) + log_card(f, data, events))
+    return f'<div class="cards"><div>{state}</div><div>{cases_card(f, status, data, events, NEWEST_CASES)}</div></div>'
+
+
+def tabs(t: dict, active: str) -> str:
+    links = "".join(f'<a class="{"active" if tab == active else ""}" href="{"?" if tab == "overview" else f"?tab={tab}"}"'
+                    f'{' aria-current="page"' if tab == active else ""}>{icon(tab)}<span>{esc(t[label])}</span></a>'
+                    for tab, label in TABS)
+    return f'<nav class="tabs">{links}</nav>'
 
 
 # --- A case ------------------------------------------------------------------------------------
@@ -819,12 +887,13 @@ def render(data: Path, lang: str, slug: str | None, query: dict[str, list[str]],
     case = (query.get("case") or [""])[0]
     if case and CASE_NAME.match(case):
         body = case_page(f, data, case)
-        start = (f'<a class="icon-button" href="?" title="{esc(t["back"])}">{icon("back")}</a>'
+        start = (f'<a class="icon-button" href="?tab=cases" title="{esc(t["back"])}">{icon("back")}</a>'
                  f'<h1>{esc(t["title"])} · {esc(t["cases"])}</h1>')
     now = time.time() if now is None else now
     if not (case and CASE_NAME.match(case)):
-        body = overview(f, data, now)
-        start = f'{APP_ICON_TAG}<h1>{esc(t["title"])}</h1>'
+        tab = tab_of(query)
+        body = view(f, data, now, tab)
+        start = f'{APP_ICON_TAG}<h1>{esc(t["title"])}</h1>{tabs(t, tab)}'
     actions = f'<span class="stamp opt">{esc(t["as_of"].format(time.strftime("%H:%M:%S", time.localtime(now))))}</span>'
     actions += f'<a class="icon-button" href="" id="refresh" title="{esc(t["refresh"])}" role="button">{icon("refresh")}</a>'
     # The settings are Home Assistant's own page, outside the ingress frame

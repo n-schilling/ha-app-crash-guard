@@ -6,7 +6,7 @@ Defective RAM cells corrupt data in the page cache. Home Assistant then crashes 
 2. **Checks the cache.** At `drop_times` it hashes all Home Assistant program files through the page cache and compares them with a reference. A file that differs is read once more straight from the drive: if the drive holds the same, the file changed on the drive (for example a package Home Assistant installed) and the reference takes its new hash; only a difference between the cache and the drive counts as corrupted. Corrupted pages are located by physical address and logged.
 3. **Locks defective RAM.** For each page in `bad_pages` it reserves the surrounding 2 MB block in the device tree, so Linux never uses it again, and restores that lock after Home Assistant OS updates.
 4. **Counts every crash.** Crashes of any program on the host, logged by systemd-coredump, are counted since boot and within `crash_window_hours`, whatever their cause.
-5. **Reports.** Its page in Home Assistant shows everything it found, and three problem sensors tell automations when something is wrong. The app sends no notifications itself: an automation on the sensors decides who hears about what (see [Example automations](#example-automations)).
+5. **Reports.** Its page in Home Assistant shows everything it found, in views as tabs (Overview, Memory lock, Crashes, Cases, Log), and three problem sensors tell automations when something is wrong. The app sends no notifications itself: an automation on the sensors decides who hears about what (see [Example automations](#example-automations)).
 
 A crash of Home Assistant:
 

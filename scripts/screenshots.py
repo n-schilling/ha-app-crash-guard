@@ -58,12 +58,19 @@ PEER = "172.30.32.2"
 APP_IP = "172.30.33.2"
 TZ = "Europe/Berlin"
 TEXT = {
-    "en": {"as_of": "As of", "refresh": "Refresh", "settings": "Settings", "back": "Back"},
-    "de": {"as_of": "Stand", "refresh": "Aktualisieren", "settings": "Einstellungen", "back": "Zurück"},
+    "en": {"as_of": "As of", "refresh": "Refresh", "settings": "Settings", "back": "Back",
+           "tabs": ["Overview", "Memory lock", "Crashes", "Cases", "Log"]},
+    "de": {"as_of": "Stand", "refresh": "Aktualisieren", "settings": "Einstellungen", "back": "Zurück",
+           "tabs": ["Übersicht", "Speichersperre", "Abstürze", "Fälle", "Protokoll"]},
 }
+# The views (tabs in the header) and where each one is
+TABS = (("overview", "?"), ("lock", "?tab=lock"), ("crashes", "?tab=crashes"), ("cases", "?tab=cases"), ("log", "?tab=log"))
 SHOTS = (  # page, file, colour scheme, width, from this element to the end
     ("", "overview.png", "light", 1040, None),
-    ("", "cases.png", "light", 1040, ".card:has(tr.link)"),
+    ("?tab=lock", "lock.png", "light", 1040, None),
+    ("?tab=crashes", "crashes.png", "light", 1040, None),
+    ("?tab=cases", "cases.png", "light", 1040, None),
+    ("?tab=log", "log.png", "light", 1040, None),
     (f"?case={demo_data.CRASH}", "crash.png", "light", 1040, None),
     (f"?case={demo_data.CHECK}", "check.png", "light", 1040, None),
     ("", "overview-dark.png", "dark", 1040, None),
@@ -165,7 +172,7 @@ def csp(page: Page) -> list[str]:
     return [v for frame in page.frames for v in (frame.evaluate("window.__csp || []") or [])]
 
 
-def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str) -> None:
+def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str, tab: str = "overview") -> None:
     t = TEXT[lang]
     h = page.evaluate("""() => {
       const header = document.querySelector("body > header");
@@ -177,6 +184,17 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str) ->
         tags: kids.map((k) => k.tagName.toLowerCase() + (k.className ? "." + k.className.split(" ").join(".") : "")),
         h1: header.querySelector(":scope > h1")?.textContent,
         back: kids[0].matches("a.icon-button") ? {href: kids[0].getAttribute("href"), title: kids[0].title} : null,
+        // The views: tabs right after the name, in its row (on a phone a bar at the bottom of the window)
+        tabs: (() => {
+          const nav = header.querySelector(":scope > nav.tabs");
+          if (!nav) return null;
+          const name = header.querySelector(":scope > h1").getBoundingClientRect(), box = nav.getBoundingClientRect();
+          const mid = (r) => (r.top + r.bottom) / 2;
+          return {labels: [...nav.children].map((a) => a.textContent), hrefs: [...nav.children].map((a) => a.getAttribute("href")),
+                  active: [...nav.querySelectorAll("a.active[aria-current=page]")].map((a) => a.getAttribute("href")),
+                  row: Math.abs(mid(box) - mid(name)) < 2, bottom: Math.abs(box.bottom - window.innerHeight) < 1,
+                  icons: [...nav.children].every((a) => a.querySelector("svg") && getComputedStyle(a.querySelector("svg")).display !== "none")};
+        })(),
         // The store icon left of the name: loaded, 24 px, in the row of the name
         icon: kids[0].matches("img.app-icon") ? (() => {
           const box = kids[0].getBoundingClientRect(), name = header.querySelector(":scope > h1").getBoundingClientRect();
@@ -196,10 +214,19 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str) ->
         return
     check(abs(h["height"] - 56) < 1, f"{where}: header 56 px high ({h['height']})")
     if sub:
-        check(h["tags"][:2] == ["a.icon-button", "h1"] and h["back"] == {"href": "?", "title": t["back"]},
-              f"{where}: back arrow before the h1 ({h['tags']}, {h['back']})")
+        check(h["tags"][:2] == ["a.icon-button", "h1"] and h["back"] == {"href": "?tab=cases", "title": t["back"]},
+              f"{where}: back arrow to the cases before the h1 ({h['tags']}, {h['back']})")
+        check(h["tabs"] is None, f"{where}: no tabs on a subpage")
     else:
-        check(h["tags"][:2] == ["img.app-icon", "h1"], f"{where}: icon, then the h1 ({h['tags']})")
+        check(h["tags"][:3] == ["img.app-icon", "h1", "nav.tabs"], f"{where}: icon, h1, then the tabs ({h['tags']})")
+        tabs = h["tabs"] or {}
+        check(tabs.get("labels") == t["tabs"] and tabs.get("hrefs") == [href for _, href in TABS],
+              f"{where}: the tabs ({tabs.get('labels')}, {tabs.get('hrefs')})")
+        check(tabs.get("active") == [dict(TABS)[tab]], f"{where}: {tab} is the active tab ({tabs.get('active')})")
+        if phone:
+            check(tabs.get("bottom") and tabs.get("icons"), f"{where}: tabs with icons at the bottom ({tabs})")
+        else:
+            check(tabs.get("row") and not tabs.get("icons"), f"{where}: tabs in the row of the name, no icons ({tabs})")
         check(h["icon"] == {"src": "icon.png", "loaded": True, "size": [24, 24], "row": True},
               f"{where}: the app's icon shows, 24 px, in the row of the name ({h['icon']})")
     check((h["h1"] or "").startswith(NAME), f"{where}: h1 names the app ({h['h1']!r})")
@@ -230,7 +257,8 @@ def look(page: Page, where: str) -> None:
 
 
 def run_checks(c: Containers, browser, shots: Path | None) -> None:
-    pages = [("overview", ""), ("crash case", f"?case={demo_data.CRASH}"), ("check case", f"?case={demo_data.CHECK}")]
+    pages = [*((tab, "" if tab == "overview" else href) for tab, href in TABS),
+             ("crash case", f"?case={demo_data.CRASH}"), ("check case", f"?case={demo_data.CHECK}")]
     backgrounds: dict[str, str] = {}
     for lang in ("en", "de"):
         for scheme, width in (("light", 1040), ("dark", 1040), ("light", 390)):
@@ -246,7 +274,7 @@ def run_checks(c: Containers, browser, shots: Path | None) -> None:
                 print(f"==> {where}")
                 answer = page.goto(c.url(query))
                 check(answer is not None and answer.status == 200, f"{where}: status 200")
-                header(page, lang, bool(query), phone, where)
+                header(page, lang, "case=" in query, phone, where, label)
                 look(page, where)
                 if not query and not phone:
                     backgrounds[scheme] = page.evaluate("getComputedStyle(document.body).backgroundColor")
@@ -300,8 +328,26 @@ def run_checks(c: Containers, browser, shots: Path | None) -> None:
     page.wait_for_function("(el) => el.textContent.length > 0", arg=pre.element_handle())
     check("Segmentation fault" in (pre.text_content() or ""), "frame: an evidence file loads through the ingress")
     frame.locator("body > header > a.icon-button").click()
+    frame.locator("body > header > nav.tabs").wait_for()
+    check(app.url == c.url("?tab=cases"), f"frame: the back arrow leads to the cases ({app.url})")
+    check(frame.locator("nav.tabs > a.active").text_content() == "Cases", "frame: the Cases tab is active")
+    # Tabs are links: the view is in the URL, so reload and back keep it
+    with page.expect_event("framenavigated", predicate=lambda f: f is app):
+        frame.locator("nav.tabs > a", has_text="Log").click()
+    frame.locator("nav.tabs > a.active", has_text="Log").wait_for()
+    check(app.url == c.url("?tab=log"), f"frame: the Log tab opens ?tab=log ({app.url})")
+    with page.expect_event("framenavigated", predicate=lambda f: f is app):
+        frame.locator("#refresh").click()
+    frame.locator("nav.tabs > a.active", has_text="Log").wait_for()
+    check(app.url == c.url("?tab=log"), f"frame: refresh stays on the tab ({app.url})")
+    with page.expect_event("framenavigated", predicate=lambda f: f is app):
+        app.evaluate("setTimeout(() => history.back(), 0)")  # the browser's back, inside the frame
+    frame.locator("nav.tabs > a.active", has_text="Cases").wait_for()
+    check(app.url == c.url("?tab=cases"), f"frame: back returns to the previous tab ({app.url})")
+    with page.expect_event("framenavigated", predicate=lambda f: f is app):
+        frame.locator("nav.tabs > a", has_text="Overview").click()
     frame.locator("#check-now").wait_for()
-    check(app.url == c.url("?"), f"frame: the back arrow leads to the start page ({app.url})")
+    check(frame.locator("a.state[href='?tab=lock']").count() == 1, "frame: the status lines lead to their views")
     check(not problems and not csp(page), f"frame: no console errors, no CSP violations ({problems + csp(page)})")
     page.close()
 

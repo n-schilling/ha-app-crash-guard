@@ -6,6 +6,7 @@ The private data is a temporary folder laid out as the guard service writes it.
 
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -101,10 +102,12 @@ class Overview(Fixture):
         self.assertIn("No defective pages configured", self.page())
 
     def test_crash_list_only_with_crashes(self) -> None:
-        self.assertIn("python3", self.page())
+        self.assertIn("python3", self.page("tab=crashes"))
+        self.assertNotIn("python3", self.page())
         (self.data / "status.json").write_text(json.dumps({**STATUS, "crashes": {**STATUS["crashes"], "programs": []}}))
-        page = self.page()
-        self.assertIn("No crash within 24 h", page)
+        self.assertIn("No crash within 24 h", self.page())
+        page = self.page("tab=crashes")
+        self.assertIn("No crash within the window.", page)
         self.assertNotIn("Programs on the host", page)
 
     def test_version_at_the_bottom(self) -> None:
@@ -123,9 +126,8 @@ class Overview(Fixture):
     def test_more_program_crashes_than_listed(self) -> None:
         (self.data / "status.json").write_text(
             json.dumps({**STATUS, "crashes": {**STATUS["crashes"], "programs_count": 300}}))
-        page = self.page()
-        self.assertIn("Home Assistant 0, programs 300 within 24 h", page)
-        self.assertIn("The newest 1 of 300", page)
+        self.assertIn("Home Assistant 0, programs 300 within 24 h", self.page())
+        self.assertIn("The newest 1 of 300", self.page("tab=crashes"))
 
     def test_shared_stylesheet(self) -> None:
         page = self.page()
@@ -144,12 +146,12 @@ class Overview(Fixture):
         self.assertIn("Home Assistant running again", page)
 
     def test_logs_are_escaped(self) -> None:
-        page = self.page()
+        page = self.page("tab=log")
         self.assertNotIn("<script>x</script>", page)
         self.assertIn("&lt;script&gt;x&lt;/script&gt;", page)
 
     def test_bad_pages(self) -> None:
-        page = self.page()
+        page = self.page("tab=lock")
         self.assertIn("0x1cc447", page)
         self.assertIn("In bad_pages", page)
         self.assertIn("/usr/x.json", page)
@@ -165,6 +167,54 @@ class Overview(Fixture):
         outside.mkdir()
         (self.data / "cases" / "20261003-000000-crash").symlink_to(outside)
         self.assertNotIn("20261003-000000-crash", self.page())
+
+
+class Views(Fixture):
+    TABS = ("overview", "lock", "crashes", "cases", "log")
+
+    def test_tabs_in_the_header(self) -> None:
+        for tab in self.TABS:
+            page = self.page("" if tab == "overview" else f"tab={tab}")
+            header = page[page.index("<header>"):page.index("</header>")]
+            self.assertRegex(header, r'^<header><img class="app-icon"[^>]*><h1>Crash Guard</h1><nav class="tabs">')
+            self.assertEqual(re.findall(r'<a class="[a-z]*" href="([^"]*)"', header),
+                             ["?", "?tab=lock", "?tab=crashes", "?tab=cases", "?tab=log"])
+            self.assertEqual(re.findall(r'<a class="active" href="([^"]*)" aria-current="page">', header),
+                             ["?" if tab == "overview" else f"?tab={tab}"])
+        de = self.page("tab=log", "de")
+        self.assertIn("<span>Übersicht</span>", de)
+        self.assertIn("<span>Protokoll</span>", de)
+
+    def test_each_detail_once(self) -> None:
+        # The overview sums up; the details are in their own view only
+        overview, lock, crashes, cases, log = (self.page("" if t == "overview" else f"tab={t}") for t in self.TABS)
+        self.assertIn('id="check-now"', overview)
+        self.assertIn('href="?tab=lock"><svg', overview)
+        self.assertIn("0x1cc447", lock)
+        self.assertNotIn("0x1cc447", overview + crashes + cases + log)
+        self.assertIn("11/SEGV", crashes)
+        self.assertNotIn("11/SEGV", overview + lock + cases + log)
+        self.assertIn("Event log", log)
+        self.assertIn("Cache checks", log)
+        self.assertNotIn("Event log", overview + lock + crashes + cases)
+        self.assertIn(f"case={CRASH}", cases)
+        self.assertNotIn('id="check-now"', lock + crashes + cases + log)
+
+    def test_newest_cases_on_the_overview(self) -> None:
+        for n in range(3):
+            (self.data / "cases" / f"2026100{3 + n}-000000-check").mkdir()
+        overview = self.page()
+        self.assertEqual(overview.count('<tr class="link"'), w.NEWEST_CASES)
+        self.assertIn('href="?tab=cases">All cases</a>', overview)
+        self.assertEqual(self.page("tab=cases").count('<tr class="link"'), 5)
+
+    def test_unknown_tab_is_the_overview(self) -> None:
+        self.assertIn('id="check-now"', self.page("tab=nothing"))
+
+    def test_case_back_to_the_cases(self) -> None:
+        page = self.page(f"case={CRASH}")
+        self.assertIn('<header><a class="icon-button" href="?tab=cases"', page)
+        self.assertNotIn('<nav class="tabs">', page)
 
 
 class Case(Fixture):
@@ -184,7 +234,7 @@ class Case(Fixture):
 
     def test_unknown_or_malformed(self) -> None:
         self.assertIn("does not exist", self.page("case=20990101-000000-crash"))
-        self.assertIn("Event log", self.page("case=../../etc"))
+        self.assertIn('id="check-now"', self.page("case=../../etc"))
 
     def test_evidence(self) -> None:
         self.assertEqual(w.evidence_text(self.data, CRASH, "container.log", "en"), "token=<b>secret</b>\n")
@@ -316,7 +366,7 @@ class Server(Fixture):
         self.assertIn("img-src 'self'", page[1]["Content-Security-Policy"])
         self.assertIn('<header><img class="app-icon" src="icon.png" alt="" width="24" height="24"><h1>', page[2])
         # A subpage has the back arrow there instead
-        self.assertIn('<header><a class="icon-button" href="?"', self.get(f"/?case={CRASH}")[2])
+        self.assertIn('<header><a class="icon-button" href="?tab=cases"', self.get(f"/?case={CRASH}")[2])
 
     def test_other_paths(self) -> None:
         self.assertEqual(self.get("/cases/" + CRASH)[0], 404)

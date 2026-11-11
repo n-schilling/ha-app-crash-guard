@@ -2,6 +2,14 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-11-11
+
+### Changed
+
+- The page is split into views instead of one long page, as tabs in the header row next to the name, like Network Plus: Overview, Memory lock, Crashes, Cases and Log. The overview sums up (the status with the check button, the newest three cases); each status line leads to its view, and every detail is in one view only. The view is in the URL (`?tab=`), so reload and back keep it. On phone width the tabs are a bar with icons at the bottom
+- A case is a subpage of the Cases view: its back arrow leads there
+- The Crashes view also says when there was no crash within the window
+
 ## [2.3.0] - 2026-11-11
 
 ### Changed

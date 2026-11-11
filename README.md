@@ -14,7 +14,7 @@ A Home Assistant app for everything about crashes on a Home Assistant OS host: i
 
 The page, made up for these pictures. It looks like Home Assistant's settings, takes over the theme in use, speaks the language of Home Assistant's interface (German or English) and shows the app's version at the bottom.
 
-<img src="docs/screenshots/overview.png" alt="Status of memory lock, page cache and crashes, the program crashes and the memory lock with its defective pages, the cases, the event log and the cache checks" width="700">
+<img src="docs/screenshots/overview.png" alt="Overview: status of memory lock, page cache and crashes, each leading to its view, and the newest cases" width="700">
 
 A Home Assistant crash the app handled: exit code, the file that was corrupted in the cache, its saved copy and the evidence:
 
@@ -24,9 +24,17 @@ A cache check that found a corrupted file:
 
 <img src="docs/screenshots/check.png" alt="Case of a cache check: the file that differed and its saved copy" width="700">
 
-The cases, the event log and the cache checks; the overview in dark mode and on a phone:
+The other views, each a tab in the header: the memory lock with the defective pages, the crashes, all cases, and the log with the cache checks:
 
-<img src="docs/screenshots/cases.png" alt="Cases, event log and cache checks" width="700">
+<img src="docs/screenshots/lock.png" alt="Memory lock view: boot slots and defective pages" width="700">
+
+<img src="docs/screenshots/crashes.png" alt="Crashes view: Home Assistant and programs on the host" width="700">
+
+<img src="docs/screenshots/cases.png" alt="Cases view: every case with its event" width="700">
+
+<img src="docs/screenshots/log.png" alt="Log view: event log and cache checks" width="700">
+
+The overview in dark mode and on a phone, where the tabs are a bar at the bottom:
 
 <img src="docs/screenshots/overview-dark.png" alt="The overview in dark mode" width="700">
 
