@@ -94,7 +94,7 @@ The guard service is Bash in [`crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/r
 scripts/check.sh
 ```
 
-`scripts/check.sh` runs what CI runs (changelog, shellcheck, ruff, the image built for this machine with the app, guard and page tests inside it, the page of that image in a browser, and the test against a real Mosquitto broker; `--no-docker` skips what needs Docker). The page check and the screenshots are one script, `scripts/screenshots.py` (see its header for the setup): it starts the built image with made-up data in a throwaway container behind a stand-in for Home Assistant's ingress, checks the page with headless Chromium and, without `--check`, takes the pictures.
+`scripts/check.sh` runs what CI runs (changelog, shellcheck, ruff, the image built for this machine with the app, guard and page tests inside it, the page of that image in a browser, and the test against a real Mosquitto broker; `--no-docker` skips what needs Docker). The page check and the screenshots are one script, `scripts/screenshots.py` (see its header for the setup): it starts the built image with made-up data in a throwaway container behind a stand-in for Home Assistant's ingress, checks the page with headless Chromium and, without `--check`, takes the pictures. The page check is not part of CI: run `scripts/check.sh` before a release that changes the page.
 
 Releases: work on `dev`, raise `version` in `crash_guard/config.yaml` and add its section to the changelog. CI runs on `dev` (amd64 and aarch64 each on a runner of its own kind); once it is green, push that commit to `main`. CI does not run again there: the release workflow checks that CI passed for the commit, then tags the version and publishes the release with that section.
 
