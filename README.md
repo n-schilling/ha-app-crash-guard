@@ -34,11 +34,11 @@ The other views, each a tab in the header: the memory lock with the defective pa
 
 <img src="docs/screenshots/log.png" alt="Log view: event log and cache checks" width="700">
 
-The overview in dark mode and on a phone, where the tabs are a bar at the bottom:
+The overview in dark mode and on a phone, with the menu button and the tabs as a bar at the bottom:
 
 <img src="docs/screenshots/overview-dark.png" alt="The overview in dark mode" width="700">
 
-<img src="docs/screenshots/overview-mobile.png" alt="The overview on a phone" width="260">
+<img src="docs/screenshots/overview-mobile.png" alt="The overview on a phone, with the menu button and the tabs as a bar at the bottom" width="260">
 
 ## Overview
 
@@ -88,7 +88,7 @@ See [the documentation](crash_guard/DOCS.md) for the options, the page, the sens
 
 ## Development
 
-The guard service is Bash in [`crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run`](crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run) with its libraries in [`crash_guard/rootfs/usr/local/lib/crash-guard`](crash_guard/rootfs/usr/local/lib/crash-guard); the helpers and the page are Python in [`crash_guard/rootfs/usr/local/bin`](crash_guard/rootfs/usr/local/bin). The page's look comes from the stylesheet shared by these apps, [`ha.css`](crash_guard/rootfs/usr/local/share/ha-app/ha.css), and its language from the script shared by them, [`ha-lang.js`](crash_guard/rootfs/usr/local/share/ha-app/ha-lang.js); both stay identical in every app.
+The guard service is Bash in [`crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run`](crash_guard/rootfs/etc/s6-overlay/s6-rc.d/guard/run) with its libraries in [`crash_guard/rootfs/usr/local/lib/crash-guard`](crash_guard/rootfs/usr/local/lib/crash-guard); the helpers and the page are Python in [`crash_guard/rootfs/usr/local/bin`](crash_guard/rootfs/usr/local/bin). The page's look comes from the stylesheet shared by these apps, [`ha.css`](crash_guard/rootfs/usr/local/share/ha-app/ha.css), its language from the script shared by them, [`ha-lang.js`](crash_guard/rootfs/usr/local/share/ha-app/ha-lang.js), and its place in Home Assistant's frame (narrow, a phone's notch, the menu button) from [`ha-frame.js`](crash_guard/rootfs/usr/local/share/ha-app/ha-frame.js); all three stay identical in every app.
 
 ```bash
 scripts/check.sh

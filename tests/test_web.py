@@ -176,7 +176,11 @@ class Views(Fixture):
         for tab in self.TABS:
             page = self.page(f"tab={tab}")
             header = page[page.index("<header>"):page.index("</header>")]
-            self.assertRegex(header, r'^<header><img class="brand"[^>]*><h1>Crash Guard</h1><nav class="tabs">')
+            # The menu button first, the name only for screen readers (ha.css hides it with tabs), no icon
+            self.assertRegex(header, r'^<header><a class="icon-button menu" href="" data-ha-menu role="button"'
+                                     r' title="Menu" aria-label="Menu"><svg[^>]*><path[^>]*/></svg></a>'
+                                     r'<h1 class="name">Crash Guard</h1><nav class="tabs">')
+            self.assertNotIn("<img", header)
             self.assertEqual(re.findall(r'<a class="tab(?: active)?" href="([^"]*)"', header),
                              ["?tab=overview", "?tab=lock", "?tab=crashes", "?tab=cases", "?tab=log"])
             self.assertEqual(re.findall(r'<a class="tab active" href="([^"]*)" aria-current="page">', header),
@@ -184,6 +188,10 @@ class Views(Fixture):
         de = self.page("tab=log", "de")
         self.assertIn("<span>Übersicht</span>", de)
         self.assertIn("<span>Protokoll</span>", de)
+
+    def test_menu_button_in_both_languages(self) -> None:
+        self.assertIn('data-ha-menu role="button" title="Menü" aria-label="Menü"', self.page("", "de"))
+        self.assertIn('data-ha-menu role="button" title="Menu" aria-label="Menu"', self.page())
 
     def test_each_detail_once(self) -> None:
         # The overview sums up; the details are in their own view only
@@ -219,9 +227,12 @@ class Views(Fixture):
             self.assertIn('<a class="tab active" href="?tab=overview" aria-current="page">', page)
 
     def test_case_back_to_the_cases(self) -> None:
+        # A subpage: the back arrow and its title, no menu button, no tabs
         page = self.page(f"case={CRASH}")
-        self.assertIn('<header><a class="icon-button" href="?tab=cases"', page)
+        self.assertIn('<header><a class="icon-button back" href="?tab=cases" title="Back" aria-label="Back"><svg', page)
+        self.assertIn("</a><h1>Crash Guard · Cases</h1>", page)
         self.assertNotIn('<nav class="tabs">', page)
+        self.assertNotIn("data-ha-menu", page[page.index("<header>"):page.index("</header>")])
 
 
 class Case(Fixture):
@@ -311,6 +322,18 @@ class Server(Fixture):
         self.assertIn("ha_lang", shared)
         self.assertTrue(w.SCRIPT.startswith(shared))
 
+    def test_shared_frame_script_after_the_language(self) -> None:
+        # ha-frame.js right after ha-lang.js, before the page's own code, in the one hashed script
+        lang = w.SHARED_SCRIPT_FILE.read_text(encoding="utf-8")
+        frame = w.FRAME_SCRIPT_FILE.read_text(encoding="utf-8")
+        self.assertIn("home-assistant/subscribe-properties", frame)
+        self.assertIn("handleSafeArea: true", frame)
+        self.assertTrue(w.SCRIPT.startswith(lang + frame))
+        page = self.get("/")[2]
+        self.assertEqual(page.count("</script>"), 1)
+        self.assertIn(f"<script>{w.SCRIPT}</script>", page)
+        self.assertIn("viewport-fit=cover", page)
+
     def test_evidence_as_plain_text(self) -> None:
         code, headers, body = self.get(f"/?case={CRASH}&file=container.log")
         self.assertEqual((code, headers["Content-Type"]), (200, "text/plain; charset=utf-8"))
@@ -374,9 +397,9 @@ class Server(Fixture):
             w.APP_ICON = saved
         page = self.get("/")
         self.assertIn("img-src 'self'", page[1]["Content-Security-Policy"])
-        self.assertIn('<header><img class="brand" src="icon.png" alt="" width="24" height="24"><h1>', page[2])
-        # A subpage has the back arrow there instead
-        self.assertIn('<header><a class="icon-button" href="?tab=cases"', self.get(f"/?case={CRASH}")[2])
+        # With its views as tabs the header shows no icon, like Home Assistant's own pages
+        self.assertNotIn("<img", page[2])
+        self.assertIn('<h1 class="name">Crash Guard</h1>', page[2])
 
     def test_other_paths(self) -> None:
         self.assertEqual(self.get("/cases/" + CRASH)[0], 404)

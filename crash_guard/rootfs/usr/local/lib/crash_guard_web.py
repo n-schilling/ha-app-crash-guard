@@ -78,7 +78,7 @@ SAVED_LAYER = re.compile(r"^[0-9a-f]{64}(-init)?_diff_")
 
 TEXT = {
     "en": {
-        "title": "Crash Guard", "settings": "Settings", "refresh": "Refresh", "as_of": "As of {}",
+        "title": "Crash Guard", "menu": "Menu", "settings": "Settings", "refresh": "Refresh", "as_of": "As of {}",
         "back": "Back", "status": "Status", "loading": "The guard service has not reported yet.",
         "lock": "Memory lock", "lock_on": "In effect: {}", "lock_ready": "Prepared, takes effect after a host reboot: {}",
         "lock_off": "Not in place: {}", "lock_error": "Check failed: {}", "outside": "Defective page outside the lock: {}",
@@ -113,7 +113,7 @@ TEXT = {
         "overview": "Overview", "log": "Log", "newest_cases": "Newest cases", "all_cases": "All cases",
     },
     "de": {
-        "title": "Crash Guard", "settings": "Einstellungen", "refresh": "Aktualisieren", "as_of": "Stand {}",
+        "title": "Crash Guard", "menu": "Menü", "settings": "Einstellungen", "refresh": "Aktualisieren", "as_of": "Stand {}",
         "back": "Zurück", "status": "Status", "loading": "Der Guard-Dienst hat sich noch nicht gemeldet.",
         "lock": "Speichersperre", "lock_on": "Greift: {}", "lock_ready": "Vorbereitet, greift nach einem Host-Neustart: {}",
         "lock_off": "Nicht eingerichtet: {}", "lock_error": "Prüfung fehlgeschlagen: {}",
@@ -155,6 +155,7 @@ TEXT = {
 
 # Material Design Icons (Apache 2.0), as Home Assistant draws them
 ICONS = {
+    "menu": "M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z",
     "overview": "M19,5V7H15V5H19M9,5V11H5V5H9M19,13V19H15V13H19M9,17V19H5V17H9M21,3H13V9H21V3M11,3H3V13H11V3M21,11H13V21H21V11M11,15H3V21H11V15Z",
     "lock": "M17,17H7V7H17M21,11V9H19V7C19,5.89 18.1,5 17,5H15V3H13V5H11V3H9V5H7C5.89,5 5,5.89 5,7V9H3V11H5V13H3V15H5V17A2,2 0 0,0 7,19H9V21H11V19H13V21H15V19H17A2,2 0 0,0 19,17V15H21V13H19V11M13,13H11V11H13M15,9H9V15H15V9Z",
     "crashes": "M8.27,3L3,8.27V15.73L8.27,21H15.73C17.5,19.24 21,15.73 21,15.73V8.27L15.73,3M9.1,5H14.9L19,9.1V14.9L14.9,19H9.1L5,14.9V9.1M11,15H13V17H11V15M11,7H13V13H11V7",
@@ -194,17 +195,24 @@ SHARED_STYLE = shared_style()
 # Home Assistant's language for the page (cookie ha_lang), shared like the
 # stylesheet; it runs first, in the page's one script
 SHARED_SCRIPT_FILE = SHARED_STYLE_FILE.with_name("ha-lang.js")
+# Home Assistant's frame (narrow, the phone's insets, its own bar off on a
+# phone, the menu button), shared the same way; it runs right after ha-lang.js
+FRAME_SCRIPT_FILE = SHARED_STYLE_FILE.with_name("ha-frame.js")
 
 
 def shared_script() -> str:
-    try:
-        return SHARED_SCRIPT_FILE.read_text(encoding="utf-8")
-    except OSError:
-        LOGGER.warning("Script %s missing", SHARED_SCRIPT_FILE)
-        return ""
+    """The scripts all the apps share (ha-lang.js, then ha-frame.js), which run before this page's own."""
+    shared = ""
+    for file in (SHARED_SCRIPT_FILE, FRAME_SCRIPT_FILE):
+        try:
+            shared += file.read_text(encoding="utf-8")
+        except OSError:
+            LOGGER.warning("Script %s missing", file)
+    return shared
 
-# The app's store icon at the left of the header, copied into the image next
-# to the stylesheet; the page links it as icon.png, relative to the ingress path
+# The app's store icon, copied into the image next to the stylesheet and
+# served as icon.png. With its views as tabs the header shows no icon (as
+# Home Assistant's own pages); a page of a single view would show it there
 APP_ICON_FILE = SHARED_STYLE_FILE.with_name("icon.png")
 
 
@@ -217,15 +225,12 @@ def app_icon() -> bytes | None:
 
 
 APP_ICON = app_icon()
-APP_ICON_TAG = '<img class="brand" src="icon.png" alt="" width="24" height="24">'
 
 # What only this page needs, after the shared stylesheet
 STYLE = """
 a.state { margin: 0 -8px 4px; padding: 4px 8px; border-radius: 8px; }
 a.state:hover { background: var(--ha-hover); }
 a.state > svg.go { margin-left: auto; align-self: center; color: var(--secondary-text-color); }
-header > .icon-button:first-child { margin-left: -12px; }
-header > .icon-button + h1 { margin-left: 12px; }
 .card h3 { margin: 0; padding: 8px 16px; font-size: var(--ha-font-size-m); font-weight: var(--ha-font-weight-medium);
   color: var(--secondary-text-color); }
 .card .content > p { margin: 0; }
@@ -862,20 +867,26 @@ def render(data: Path, lang: str, slug: str | None, query: dict[str, list[str]],
     case = (query.get("case") or [""])[0]
     if case and CASE_NAME.match(case):
         body = case_page(f, data, case)
-        start = (f'<a class="icon-button" href="?tab=cases" title="{esc(t["back"])}">{icon("back")}</a>'
+        # A subpage: the back arrow to the cases and its title, no menu, no tabs
+        start = (f'<a class="icon-button back" href="?tab=cases" title="{esc(t["back"])}"'
+                 f' aria-label="{esc(t["back"])}">{icon("back")}</a>'
                  f'<h1>{esc(t["title"])} · {esc(t["cases"])}</h1>')
     now = time.time() if now is None else now
     if not (case and CASE_NAME.match(case)):
         tab = tab_of(query)
         body = view(f, data, now, tab)
-        start = f'{APP_ICON_TAG}<h1>{esc(t["title"])}</h1>{tabs(t, tab)}'
+        # As Home Assistant's own pages: the menu button (narrow only), the views
+        # (no icon and no visible name beside them; the h1 stays for screen readers)
+        menu = (f'<a class="icon-button menu" href="" data-ha-menu role="button" title="{esc(t["menu"])}"'
+                f' aria-label="{esc(t["menu"])}">{icon("menu")}</a>')
+        start = f'{menu}<h1 class="name">{esc(t["title"])}</h1>{tabs(t, tab)}'
     actions = f'<span class="stamp opt">{esc(t["as_of"].format(time.strftime("%H:%M:%S", time.localtime(now))))}</span>'
     actions += f'<a class="icon-button" href="" id="refresh" title="{esc(t["refresh"])}" role="button">{icon("refresh")}</a>'
     # The settings are Home Assistant's own page, outside the ingress frame
     actions += (f'<a class="icon-button" href="/config/app/{esc(slug)}/config" target="_top" title="{esc(t["settings"])}">'
                 f'{icon("settings")}</a>' if slug else "")
     return (f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
             f"<title>{esc(t['title'])}</title><style>{SHARED_STYLE}</style><style>{STYLE}</style>"
             f"<script>{SCRIPT}</script></head><body>"
             f'<header>{start}<div class="actions">{actions}</div></header><main>{body}</main>{version_line(version)}'
