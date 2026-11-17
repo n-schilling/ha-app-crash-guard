@@ -7,14 +7,17 @@ Run by scripts/screenshots.py in a throwaway container (`--tmpfs /data`):
 It does what the service web/run does before the page starts (the data is
 root's and readable for the group cgweb, the page's own folder is cgweb's),
 then drops to the user cgweb and runs the page of the image,
-/usr/local/lib/crash_guard_web.py, unchanged. The clock of the page stands
-still at demo_data.NOW, so the pictures only change when the page does.
+/usr/local/lib/crash_guard_web.py, unchanged. The clock of the page starts at
+demo_data.NOW and goes one second further each time the page reads it (once
+per request), so refresh moves the stamp while the pictures, taken in the same
+order every run, only change when the page does.
 """
 
 from __future__ import annotations
 
 import os
 import pwd
+import itertools
 import runpy
 import sys
 import time
@@ -43,7 +46,8 @@ def main() -> None:
     os.setgroups([])
     os.setgid(user.pw_gid)
     os.setuid(user.pw_uid)
-    time.time = lambda: demo_data.NOW
+    ticks = itertools.count()
+    time.time = lambda: demo_data.NOW + next(ticks)
     runpy.run_path("/usr/local/lib/crash_guard_web.py", run_name="__main__")
 
 

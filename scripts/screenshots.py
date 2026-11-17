@@ -50,7 +50,8 @@ import ingress  # noqa: E402
 
 OUT = ROOT / "docs/screenshots"
 VERSION = re.search(r'^version: "?([^"\n]+)"?$', (ROOT / "crash_guard/config.yaml").read_text(), re.M)[1]
-NAME = "Crash Guard"
+# The name the app store shows; the header must show exactly this
+NAME = re.search(r'^name: "?([^"\n]+)"?$', (ROOT / "crash_guard/config.yaml").read_text(), re.M)[1]
 HOST = "1a2b3c4d-crash-guard"          # the Supervisor names the container's host after the slug
 SLUG = HOST.replace("-", "_")
 SUBNET = "172.30.32.0/23"
@@ -64,7 +65,7 @@ TEXT = {
            "tabs": ["Übersicht", "Speichersperre", "Abstürze", "Fälle", "Protokoll"]},
 }
 # The views (tabs in the header) and where each one is
-TABS = (("overview", "?"), ("lock", "?tab=lock"), ("crashes", "?tab=crashes"), ("cases", "?tab=cases"), ("log", "?tab=log"))
+TABS = (("overview", "?tab=overview"), ("lock", "?tab=lock"), ("crashes", "?tab=crashes"), ("cases", "?tab=cases"), ("log", "?tab=log"))
 SHOTS = (  # page, file, colour scheme, width, from this element to the end
     ("", "overview.png", "light", 1040, None),
     ("?tab=lock", "lock.png", "light", 1040, None),
@@ -187,6 +188,7 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str, ta
         // The views: tabs right after the name, in its row (on a phone a bar at the bottom of the window)
         tabs: (() => {
           const nav = header.querySelector(":scope > nav.tabs");
+          if (nav && [...nav.children].some((a) => !a.matches("a.tab"))) return {kids: "not all a.tab"};
           if (!nav) return null;
           const name = header.querySelector(":scope > h1").getBoundingClientRect(), box = nav.getBoundingClientRect();
           const mid = (r) => (r.top + r.bottom) / 2;
@@ -196,11 +198,27 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str, ta
                   icons: [...nav.children].every((a) => a.querySelector("svg") && getComputedStyle(a.querySelector("svg")).display !== "none")};
         })(),
         // The store icon left of the name: loaded, 24 px, in the row of the name
-        icon: kids[0].matches("img.app-icon") ? (() => {
+        icon: kids[0].matches("img.brand") ? (() => {
           const box = kids[0].getBoundingClientRect(), name = header.querySelector(":scope > h1").getBoundingClientRect();
           return {src: kids[0].getAttribute("src"), loaded: kids[0].complete && kids[0].naturalWidth > 0,
-                  size: [box.width, box.height], row: Math.abs((box.top + box.bottom) / 2 - (name.top + name.bottom) / 2) < 2};
+                  size: [box.width, box.height], row: Math.abs((box.top + box.bottom) / 2 - (name.top + name.bottom) / 2) < 2,
+                  left: box.right <= name.left};
         })() : null,
+        // Icon (or back arrow), name and the buttons lie within the header's box
+        inside: (() => {
+          const box = header.getBoundingClientRect();
+          const parts = [kids[0], header.querySelector(":scope > h1"),
+                         ...(actions ? [...actions.children].filter((a) => getComputedStyle(a).display !== "none") : [])];
+          return parts.filter((el) => { const r = el.getBoundingClientRect();
+            return r.left < box.left - 0.5 || r.right > box.right + 0.5 || r.top < box.top - 0.5 || r.bottom > box.bottom + 0.5;
+          }).map((el) => el.tagName.toLowerCase() + (el.id ? "#" + el.id : ""));
+        })(),
+        // Nothing else fixed at the bottom of the window (the bottom bar is the tabs)
+        bars: [...document.body.querySelectorAll("*")].filter((el) => {
+          const st = getComputedStyle(el), r = el.getBoundingClientRect();
+          return (st.position === "fixed" || st.position === "sticky") && r.height > 0
+            && Math.abs(r.bottom - window.innerHeight) < 1;
+        }).length,
         actions: actions ? [...actions.children].map((a) => ({
           tag: a.tagName.toLowerCase(), cls: a.className, id: a.id, text: a.textContent.trim(),
           href: a.getAttribute("href"), target: a.getAttribute("target"), role: a.getAttribute("role"),
@@ -213,12 +231,16 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str, ta
         check(False, f"{where}: a header")
         return
     check(abs(h["height"] - 56) < 1, f"{where}: header 56 px high ({h['height']})")
+    check(h["inside"] == [], f"{where}: icon, name and buttons within the header ({h['inside']} outside)")
     if sub:
         check(h["tags"][:2] == ["a.icon-button", "h1"] and h["back"] == {"href": "?tab=cases", "title": t["back"]},
               f"{where}: back arrow to the cases before the h1 ({h['tags']}, {h['back']})")
         check(h["tabs"] is None, f"{where}: no tabs on a subpage")
+        check(h["bars"] == 0, f"{where}: no bottom bar on a subpage ({h['bars']})")
+        # A subpage keeps its own title
+        check(h["h1"] == f"{NAME} · {t['tabs'][3]}", f"{where}: h1 is the subpage's title ({h['h1']!r})")
     else:
-        check(h["tags"][:3] == ["img.app-icon", "h1", "nav.tabs"], f"{where}: icon, h1, then the tabs ({h['tags']})")
+        check(h["tags"][:3] == ["img.brand", "h1", "nav.tabs"], f"{where}: icon, h1, then the tabs ({h['tags']})")
         tabs = h["tabs"] or {}
         check(tabs.get("labels") == t["tabs"] and tabs.get("hrefs") == [href for _, href in TABS],
               f"{where}: the tabs ({tabs.get('labels')}, {tabs.get('hrefs')})")
@@ -226,10 +248,12 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str, ta
         if phone:
             check(tabs.get("bottom") and tabs.get("icons"), f"{where}: tabs with icons at the bottom ({tabs})")
         else:
-            check(tabs.get("row") and not tabs.get("icons"), f"{where}: tabs in the row of the name, no icons ({tabs})")
-        check(h["icon"] == {"src": "icon.png", "loaded": True, "size": [24, 24], "row": True},
-              f"{where}: the app's icon shows, 24 px, in the row of the name ({h['icon']})")
-    check((h["h1"] or "").startswith(NAME), f"{where}: h1 names the app ({h['h1']!r})")
+            check(tabs.get("row") and not tabs.get("icons") and not tabs.get("bottom"),
+                  f"{where}: tabs in the row of the name, no icons ({tabs})")
+            check(h["bars"] == 0, f"{where}: no bottom bar on a wide screen ({h['bars']})")
+        check(h["icon"] == {"src": "icon.png", "loaded": True, "size": [24, 24], "row": True, "left": True},
+              f"{where}: the app's icon shows, 24 px, left of the name in its row ({h['icon']})")
+        check(h["h1"] == NAME, f"{where}: h1 is the name of config.yaml ({h['h1']!r} vs {NAME!r})")
     check(h["tags"][-1] == "div.actions", f"{where}: .actions last in the header")
     a = h["actions"]
     check(len(a) == 3, f"{where}: exactly stamp, refresh, settings in .actions ({[x['tag'] for x in a]})")
@@ -257,8 +281,9 @@ def look(page: Page, where: str) -> None:
 
 
 def run_checks(c: Containers, browser, shots: Path | None) -> None:
-    pages = [*((tab, "" if tab == "overview" else href) for tab, href in TABS),
-             ("crash case", f"?case={demo_data.CRASH}"), ("check case", f"?case={demo_data.CHECK}")]
+    # (label, query, active tab); without tab (and with a bare ?) the first view
+    pages = [("no tab", "", "overview"), ("bare ?", "?", "overview"), *((tab, href, tab) for tab, href in TABS),
+             ("crash case", f"?case={demo_data.CRASH}", ""), ("check case", f"?case={demo_data.CHECK}", "")]
     backgrounds: dict[str, str] = {}
     for lang in ("en", "de"):
         for scheme, width in (("light", 1040), ("dark", 1040), ("light", 390)):
@@ -269,12 +294,12 @@ def run_checks(c: Containers, browser, shots: Path | None) -> None:
                                           device_scale_factor=2 if phone else 1)
             page = context.new_page()
             problems = watch(page)
-            for label, query in pages:
+            for label, query, tab in pages:
                 where = f"{label}, {lang}, {scheme}, {width} px"
                 print(f"==> {where}")
                 answer = page.goto(c.url(query))
                 check(answer is not None and answer.status == 200, f"{where}: status 200")
-                header(page, lang, "case=" in query, phone, where, label)
+                header(page, lang, "case=" in query, phone, where, tab)
                 look(page, where)
                 if not query and not phone:
                     backgrounds[scheme] = page.evaluate("getComputedStyle(document.body).backgroundColor")
@@ -309,10 +334,13 @@ def run_checks(c: Containers, browser, shots: Path | None) -> None:
     frame.locator("body > header h1").wait_for()
     check(frame.locator("body > header h1").text_content() == NAME, "frame: the page shows in the iframe")
     app = next(f for f in page.frames if f.url.startswith(c.url()))
+    before = frame.locator("body > header .stamp").text_content()
     with page.expect_event("framenavigated", predicate=lambda f: f is app):
         frame.locator("#refresh").click()
     frame.locator("body > header h1").wait_for()
     check(app.url == c.url(), f"frame: refresh reloads the same page ({app.url})")
+    after = frame.locator("body > header .stamp").text_content()
+    check(after != before, f"frame: refresh moves the stamp ({before!r} -> {after!r})")
     button = frame.locator("#check-now")
     check(button.is_enabled(), "frame: check button ready")
     with page.expect_event("framenavigated", predicate=lambda f: f is app):
@@ -330,22 +358,22 @@ def run_checks(c: Containers, browser, shots: Path | None) -> None:
     frame.locator("body > header > a.icon-button").click()
     frame.locator("body > header > nav.tabs").wait_for()
     check(app.url == c.url("?tab=cases"), f"frame: the back arrow leads to the cases ({app.url})")
-    check(frame.locator("nav.tabs > a.active").text_content() == "Cases", "frame: the Cases tab is active")
+    check(frame.locator("nav.tabs > a.tab.active").text_content() == "Cases", "frame: the Cases tab is active")
     # Tabs are links: the view is in the URL, so reload and back keep it
     with page.expect_event("framenavigated", predicate=lambda f: f is app):
-        frame.locator("nav.tabs > a", has_text="Log").click()
-    frame.locator("nav.tabs > a.active", has_text="Log").wait_for()
+        frame.locator("nav.tabs > a.tab", has_text="Log").click()
+    frame.locator("nav.tabs > a.tab.active", has_text="Log").wait_for()
     check(app.url == c.url("?tab=log"), f"frame: the Log tab opens ?tab=log ({app.url})")
     with page.expect_event("framenavigated", predicate=lambda f: f is app):
         frame.locator("#refresh").click()
-    frame.locator("nav.tabs > a.active", has_text="Log").wait_for()
+    frame.locator("nav.tabs > a.tab.active", has_text="Log").wait_for()
     check(app.url == c.url("?tab=log"), f"frame: refresh stays on the tab ({app.url})")
     with page.expect_event("framenavigated", predicate=lambda f: f is app):
         app.evaluate("setTimeout(() => history.back(), 0)")  # the browser's back, inside the frame
-    frame.locator("nav.tabs > a.active", has_text="Cases").wait_for()
+    frame.locator("nav.tabs > a.tab.active", has_text="Cases").wait_for()
     check(app.url == c.url("?tab=cases"), f"frame: back returns to the previous tab ({app.url})")
     with page.expect_event("framenavigated", predicate=lambda f: f is app):
-        frame.locator("nav.tabs > a", has_text="Overview").click()
+        frame.locator("nav.tabs > a.tab", has_text="Overview").click()
     frame.locator("#check-now").wait_for()
     check(frame.locator("a.state[href='?tab=lock']").count() == 1, "frame: the status lines lead to their views")
     check(not problems and not csp(page), f"frame: no console errors, no CSP violations ({problems + csp(page)})")

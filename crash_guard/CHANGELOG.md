@@ -2,6 +2,14 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-11-17
+
+### Changed
+
+- The page's header follows the shared app standard: the shared stylesheet `ha.css` now carries the header's icon (`img.brand`), the tabs (`a.tab`) and the bottom bar on phone width, so the page drops its own copy of these rules; it looks the same as before
+- Every view has its address, the overview too (`?tab=overview`); an address without a view still opens the overview
+- The page check compares the header's name with `name` in `config.yaml`, checks that the icon is left of the name, that icon, name and buttons stay inside the header on phone width, that a wide screen has no bottom bar, and that refresh moves the stamp
+
 ## [2.4.0] - 2026-11-11
 
 ### Changed

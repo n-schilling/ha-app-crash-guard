@@ -174,20 +174,20 @@ class Views(Fixture):
 
     def test_tabs_in_the_header(self) -> None:
         for tab in self.TABS:
-            page = self.page("" if tab == "overview" else f"tab={tab}")
+            page = self.page(f"tab={tab}")
             header = page[page.index("<header>"):page.index("</header>")]
-            self.assertRegex(header, r'^<header><img class="app-icon"[^>]*><h1>Crash Guard</h1><nav class="tabs">')
-            self.assertEqual(re.findall(r'<a class="[a-z]*" href="([^"]*)"', header),
-                             ["?", "?tab=lock", "?tab=crashes", "?tab=cases", "?tab=log"])
-            self.assertEqual(re.findall(r'<a class="active" href="([^"]*)" aria-current="page">', header),
-                             ["?" if tab == "overview" else f"?tab={tab}"])
+            self.assertRegex(header, r'^<header><img class="brand"[^>]*><h1>Crash Guard</h1><nav class="tabs">')
+            self.assertEqual(re.findall(r'<a class="tab(?: active)?" href="([^"]*)"', header),
+                             ["?tab=overview", "?tab=lock", "?tab=crashes", "?tab=cases", "?tab=log"])
+            self.assertEqual(re.findall(r'<a class="tab active" href="([^"]*)" aria-current="page">', header),
+                             [f"?tab={tab}"])
         de = self.page("tab=log", "de")
         self.assertIn("<span>Übersicht</span>", de)
         self.assertIn("<span>Protokoll</span>", de)
 
     def test_each_detail_once(self) -> None:
         # The overview sums up; the details are in their own view only
-        overview, lock, crashes, cases, log = (self.page("" if t == "overview" else f"tab={t}") for t in self.TABS)
+        overview, lock, crashes, cases, log = (self.page(f"tab={t}") for t in self.TABS)
         self.assertIn('id="check-now"', overview)
         self.assertIn('href="?tab=lock"><svg', overview)
         self.assertIn("0x1cc447", lock)
@@ -210,6 +210,13 @@ class Views(Fixture):
 
     def test_unknown_tab_is_the_overview(self) -> None:
         self.assertIn('id="check-now"', self.page("tab=nothing"))
+
+    def test_without_tab_the_overview(self) -> None:
+        # ?tab=overview, a request without tab (or a bare ?) and an empty tab show the first view
+        for query in ("", "tab="):
+            page = self.page(query)
+            self.assertIn('id="check-now"', page)
+            self.assertIn('<a class="tab active" href="?tab=overview" aria-current="page">', page)
 
     def test_case_back_to_the_cases(self) -> None:
         page = self.page(f"case={CRASH}")
@@ -275,6 +282,9 @@ class Server(Fixture):
         self.assertIn("frame-ancestors 'self'", headers["Content-Security-Policy"])
         self.assertIn("Crash Guard 1.2.3</footer>", body)
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        # Without tab, or with a bare ?, the first view
+        for path in ("/", "/?", "/?tab=overview"):
+            self.assertIn('<a class="tab active" href="?tab=overview"', self.get(path)[2])
 
     def test_only_the_own_script_runs(self) -> None:
         csp = self.get("/")[1]["Content-Security-Policy"]
@@ -364,7 +374,7 @@ class Server(Fixture):
             w.APP_ICON = saved
         page = self.get("/")
         self.assertIn("img-src 'self'", page[1]["Content-Security-Policy"])
-        self.assertIn('<header><img class="app-icon" src="icon.png" alt="" width="24" height="24"><h1>', page[2])
+        self.assertIn('<header><img class="brand" src="icon.png" alt="" width="24" height="24"><h1>', page[2])
         # A subpage has the back arrow there instead
         self.assertIn('<header><a class="icon-button" href="?tab=cases"', self.get(f"/?case={CRASH}")[2])
 

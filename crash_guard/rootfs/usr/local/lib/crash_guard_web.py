@@ -217,35 +217,10 @@ def app_icon() -> bytes | None:
 
 
 APP_ICON = app_icon()
-APP_ICON_TAG = '<img class="app-icon" src="icon.png" alt="" width="24" height="24">'
+APP_ICON_TAG = '<img class="brand" src="icon.png" alt="" width="24" height="24">'
 
 # What only this page needs, after the shared stylesheet
 STYLE = """
-header > .app-icon { flex: none; width: 24px; height: 24px; margin-right: 12px; }
-header > h1 { flex: none; }
-/* The views as tabs in the header row, like Home Assistant's own (and Network
-   Plus); on phone width a bar at the bottom with icons, as in its app */
-header > nav.tabs { display: flex; align-self: stretch; min-width: 0; margin-left: 24px; overflow-x: auto;
-  scrollbar-width: none; }
-nav.tabs > a { display: flex; align-items: center; justify-content: center; padding: 0 20px; position: relative;
-  color: var(--sidebar-text-color); font-weight: var(--ha-font-weight-medium); white-space: nowrap; opacity: .8; }
-nav.tabs > a:hover { background: var(--ha-hover); }
-nav.tabs > a.active { color: var(--primary-color); opacity: 1; }
-nav.tabs > a.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
-  background: var(--primary-color); }
-nav.tabs > a > svg { display: none; }
-@media (max-width: 600px) {
-  header > nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; margin: 0; overflow: hidden;
-    background: var(--sidebar-background-color); border-top: 1px solid var(--divider-color);
-    padding-bottom: env(safe-area-inset-bottom); }
-  nav.tabs > a { flex: 1 1 0; flex-direction: column; gap: 2px; height: 56px; padding: 6px 2px 4px; min-width: 0;
-    font-size: 11px; }
-  nav.tabs > a > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-  nav.tabs > a > svg { display: block; padding: 2px 12px; border-radius: 14px; box-sizing: content-box; }
-  nav.tabs > a.active > svg { background: color-mix(in srgb, var(--primary-color) 15%, transparent); }
-  nav.tabs > a.active::after { display: none; }
-  body:has(> header > nav.tabs) { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
-}
 a.state { margin: 0 -8px 4px; padding: 4px 8px; border-radius: 8px; }
 a.state:hover { background: var(--ha-hover); }
 a.state > svg.go { margin-left: auto; align-self: center; color: var(--secondary-text-color); }
@@ -763,7 +738,7 @@ def view(f: Format, data: Path, now: float, tab: str) -> str:
 
 
 def tabs(t: dict, active: str) -> str:
-    links = "".join(f'<a class="{"active" if tab == active else ""}" href="{"?" if tab == "overview" else f"?tab={tab}"}"'
+    links = "".join(f'<a class="{"tab active" if tab == active else "tab"}" href="?tab={tab}"'
                     f'{' aria-current="page"' if tab == active else ""}>{icon(tab)}<span>{esc(t[label])}</span></a>'
                     for tab, label in TABS)
     return f'<nav class="tabs">{links}</nav>'
