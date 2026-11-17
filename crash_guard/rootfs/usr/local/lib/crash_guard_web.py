@@ -95,7 +95,7 @@ TEXT = {
         "lock_checked": "Checked", "yes": "yes", "no": "no",
         "pages": "Defective pages", "pfn": "Page", "occasion": "Found at", "bits": "Bits", "file": "File",
         "no_bad": "No defective page found yet.", "configured": "In bad_pages",
-        "cases": "Cases", "kind": "Kind", "no_cases": "No case yet.", "kept": "The newest {} cases are kept.",
+        "cases": "Cases", "case_title": "Case {}", "kind": "Kind", "no_cases": "No case yet.", "kept": "The newest {} cases are kept.",
         "kinds": {"check": "Cache check", "drop": "Cache drop", "crash": "Home Assistant crash", "ref": "Reference built"},
         "case_unknown": "This case does not exist (any more).", "exit": "Exit code", "error": "Error",
         "started": "Started", "finished": "Finished", "oom": "Out of memory",
@@ -132,7 +132,7 @@ TEXT = {
         "lock_checked": "Geprüft", "yes": "ja", "no": "nein",
         "pages": "Defekte Seiten", "pfn": "Seite", "occasion": "Gefunden bei", "bits": "Bits", "file": "Datei",
         "no_bad": "Noch keine defekte Seite gefunden.", "configured": "In bad_pages",
-        "cases": "Fälle", "kind": "Art", "no_cases": "Noch kein Fall.", "kept": "Die neuesten {} Fälle bleiben erhalten.",
+        "cases": "Fälle", "case_title": "Fall {}", "kind": "Art", "no_cases": "Noch kein Fall.", "kept": "Die neuesten {} Fälle bleiben erhalten.",
         "kinds": {"check": "Cache-Prüfung", "drop": "Cache geleert", "crash": "Absturz von Home Assistant",
                   "ref": "Referenz gebaut"},
         "case_unknown": "Diesen Fall gibt es (nicht mehr).", "exit": "Exit-Code", "error": "Fehler",
@@ -867,10 +867,11 @@ def render(data: Path, lang: str, slug: str | None, query: dict[str, list[str]],
     case = (query.get("case") or [""])[0]
     if case and CASE_NAME.match(case):
         body = case_page(f, data, case)
-        # A subpage: the back arrow to the cases and its title, no menu, no tabs
+        # A subpage: the back arrow to the cases and the case's name as its title,
+        # no menu, no tabs
         start = (f'<a class="icon-button back" href="?tab=cases" title="{esc(t["back"])}"'
                  f' aria-label="{esc(t["back"])}">{icon("back")}</a>'
-                 f'<h1>{esc(t["title"])} · {esc(t["cases"])}</h1>')
+                 f'<h1>{esc(t["case_title"].format(case))}</h1>')
     now = time.time() if now is None else now
     if not (case and CASE_NAME.match(case)):
         tab = tab_of(query)

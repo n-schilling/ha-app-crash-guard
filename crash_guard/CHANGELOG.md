@@ -2,6 +2,12 @@
 
 All notable changes to this app are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the app uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] - 2026-11-17
+
+### Changed
+
+- A case opens with its name as the title, for example "Case 20261105-163002-check" ("Fall …" in German), instead of "Crash Guard · Cases"
+
 ## [2.5.0] - 2026-11-17
 
 ### Changed

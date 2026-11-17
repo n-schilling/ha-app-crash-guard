@@ -71,9 +71,9 @@ PEER = "172.30.32.2"
 APP_IP = "172.30.33.2"
 TZ = "Europe/Berlin"
 TEXT = {
-    "en": {"as_of": "As of", "refresh": "Refresh", "settings": "Settings", "back": "Back", "menu": "Menu",
+    "en": {"as_of": "As of", "refresh": "Refresh", "settings": "Settings", "back": "Back", "menu": "Menu", "case": "Case {}",
            "tabs": ["Overview", "Memory lock", "Crashes", "Cases", "Log"]},
-    "de": {"as_of": "Stand", "refresh": "Aktualisieren", "settings": "Einstellungen", "back": "Zurück", "menu": "Menü",
+    "de": {"as_of": "Stand", "refresh": "Aktualisieren", "settings": "Einstellungen", "back": "Zurück", "menu": "Menü", "case": "Fall {}",
            "tabs": ["Übersicht", "Speichersperre", "Abstürze", "Fälle", "Protokoll"]},
 }
 # The views (tabs in the header) and where each one is
@@ -259,8 +259,10 @@ def header(page: Page | Frame, lang: str, sub: bool, phone: bool, where: str, ta
               and b == {"first": True, "href": "?tab=cases", "title": t["back"], "icon": True, "shown": True},
               f"{where}: back arrow to the cases, the h1, the actions ({h['tags']}, {h['back']})")
         check(h["tabs"] is None and h["menu"] is None, f"{where}: no tabs and no menu button on a subpage")
-        # A subpage keeps its own title
-        check(h["h1"] == f"{NAME} · {t['tabs'][3]}" and not h["h1Hidden"], f"{where}: h1 is the subpage's title ({h['h1']!r})")
+        # A case is titled by its name ("Case 20261105-163002-check")
+        case = (re.search(r"[?&]case=([^&#]+)", page.url) or [None, ""])[1]
+        check(bool(case) and h["h1"] == t["case"].format(case) and not h["h1Hidden"],
+              f"{where}: h1 is the case's name ({h['h1']!r})")
     else:
         check(h["tags"] == ["a.icon-button.menu", "h1.name", "nav.tabs", "div.actions"],
               f"{where}: the menu button, h1, the tabs and the actions ({h['tags']})")

@@ -230,7 +230,8 @@ class Views(Fixture):
         # A subpage: the back arrow and its title, no menu button, no tabs
         page = self.page(f"case={CRASH}")
         self.assertIn('<header><a class="icon-button back" href="?tab=cases" title="Back" aria-label="Back"><svg', page)
-        self.assertIn("</a><h1>Crash Guard · Cases</h1>", page)
+        self.assertIn(f"</a><h1>Case {CRASH}</h1>", page)
+        self.assertIn(f"</a><h1>Fall {CRASH}</h1>", self.page(f"case={CRASH}", lang="de"))
         self.assertNotIn('<nav class="tabs">', page)
         self.assertNotIn("data-ha-menu", page[page.index("<header>"):page.index("</header>")])
 
